@@ -1,0 +1,15 @@
+# python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# build
+build/
+dist/
+
+# env
+venv/
+.env
+
+# pyinstaller
+*.spec
