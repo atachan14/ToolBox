@@ -1,13 +1,6 @@
-from PySide6.QtCore import QTimer
+from __future__ import annotations
 
 
-def flash_text(label, color="#2ecc71", duration=150):
-
-    original = label.styleSheet()
-
-    label.setStyleSheet(f"color:{color};")
-
-    QTimer.singleShot(
-        duration,
-        lambda: label.setStyleSheet(original)
-    )
+def flash_text(_widget):
+    """Placeholder animation hook."""
+    return None

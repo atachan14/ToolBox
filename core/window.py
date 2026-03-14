@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from tabs.memo.tool import MemoTab
 from tabs.clamp.tool import ClampTab
 from PySide6.QtCore import QSettings
+from core.new_tab import NewTab
 
 class MainWindow(QMainWindow):
 
@@ -53,23 +54,20 @@ class MainWindow(QMainWindow):
         if self.tabs.tabText(index) != "+":
             return
 
-        self.open_new_tab_dialog()
+        self.open_new_tab()
 
-    def open_new_tab_dialog(self):
+    def open_new_tab(self):
 
-        tools = ["Memo", "Clamp"]
+        plus_index = self.tabs.count() - 1
 
-        tool_name, ok = QInputDialog.getItem(
-            self,
-            "Select Tool",
-            "Tool:",
-            tools,
-            0,
-            False
-        )
+        widget = NewTab(self)
 
-        if not ok:
-            return
+        self.tabs.insertTab(plus_index, widget, "New")
+        self.tabs.setCurrentIndex(plus_index)
+
+    def replace_tab(self, old_widget, tool_name):
+
+        index = self.tabs.indexOf(old_widget)
 
         if tool_name == "Memo":
             widget = MemoTab()
@@ -77,11 +75,9 @@ class MainWindow(QMainWindow):
         elif tool_name == "Clamp":
             widget = ClampTab()
 
-        plus_index = self.tabs.count() - 1
-
-        self.tabs.insertTab(plus_index, widget, tool_name)
-
-        self.tabs.setCurrentIndex(plus_index)
+        self.tabs.removeTab(index)
+        self.tabs.insertTab(index, widget, tool_name)
+        self.tabs.setCurrentIndex(index)
 
     def close_tab(self, index):
 

@@ -5,7 +5,7 @@ from tabs.clamp.history import ClampHistory
 
 
 class ClampTab(QWidget):
-
+    TOOL_NAME = "Clamp"
     def __init__(self):
         super().__init__()
 
