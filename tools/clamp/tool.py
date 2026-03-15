@@ -1,12 +1,17 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
+from PySide6.QtWidgets import  QVBoxLayout, QTabWidget
 
-from tabs.clamp.calculator import ClampCalculator
-from tabs.clamp.history import ClampHistory
+from tools.clamp.calculator import ClampCalculator
+from tools.clamp.history import ClampHistory
+from core.tool_base import ToolBase
 
 
-class ClampTab(QWidget):
-    TOOL_NAME = "Clamp"
-    def __init__(self):
+class Tab(ToolBase):
+    TOOL_NAME = "clamp"
+    TOOL_DEFAULT_LABEL = "Clamp"
+    TOOL_ORDER = 10
+    
+    TOOL_FILES = ["history.json"]
+    def __init__(self, folder=None):
         super().__init__()
 
         layout = QVBoxLayout()

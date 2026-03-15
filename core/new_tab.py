@@ -1,11 +1,4 @@
-from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QGridLayout,
-    QPushButton,
-    QHBoxLayout
-)
-
+from PySide6.QtWidgets import QWidget, QGridLayout, QPushButton
 
 class NewTab(QWidget):
 
@@ -14,34 +7,19 @@ class NewTab(QWidget):
 
         self.main = main
 
-        root = QVBoxLayout(self)
+        grid = QGridLayout(self)
 
-        # 中央に寄せるコンテナ
-        center = QHBoxLayout()
-        root.addLayout(center)
-        root.addStretch()
+        tools = list(self.main.tools.items())
+        cols = 2
 
-        # 固定幅のボックス
-        box = QWidget()
-        box.setMaximumWidth(300)
+        for i, (name, tool) in enumerate(tools):
+            btn = QPushButton(tool.TOOL_DEFAULT_LABEL)
 
-        grid = QGridLayout(box)
-        grid.setSpacing(12)
+            row = i // cols
+            col = i % cols
 
-        memo = QPushButton("Memo")
-        clamp = QPushButton("Clamp")
+            grid.addWidget(btn, row, col)
 
-        memo.setMinimumHeight(40)
-        clamp.setMinimumHeight(40)
-
-        grid.addWidget(memo, 0, 0)
-        grid.addWidget(clamp, 0, 1)
-
-        memo.clicked.connect(lambda: self.main.replace_tab(self, "Memo"))
-        clamp.clicked.connect(lambda: self.main.replace_tab(self, "Clamp"))
-
-        center.addStretch()
-        center.addWidget(box)
-        center.addStretch()
-
-        root.addStretch()
+            btn.clicked.connect(
+                lambda _, t=tool: self.main.open_tool(t, self)
+            )
