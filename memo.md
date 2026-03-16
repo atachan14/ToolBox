@@ -5,14 +5,19 @@
     - 閉じたタブの復元
     - 常に最前に表示
 
+    - success_colorとerror_color
+    - color調整
+
 ## markdown ##
     - preview
-    - import時にTabのリネーム
+    - import時にTabのリネーム（重複時index）
+    - ドラッグでimport
     - export時にTab名をファイル名にする。
+    - 外のファイルと同期（？）するモード
 
 ## clamp ##
+    - preview
     - history
-        - クリックでformに送信してexe実行
-        - history.jsonに保存
-    
-    
+        1. historyの[view_range]
+        2. logic改善
+    - self.tool.history.add_history(payload, min_px, min_view, max_view, max_px)はsuccessに置いちゃだめ？

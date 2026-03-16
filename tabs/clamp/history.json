@@ -1,0 +1,82 @@
+[
+  {
+    "view_range": "350~767",
+    "clamp": "clamp(16px, calc(-4.1439px + 5.7554vw), 40px)",
+    "min_px": 16.0,
+    "min_view": 350.0,
+    "max_view": 767.0,
+    "max_px": 40.0
+  },
+  {
+    "view_range": "767~1920",
+    "clamp": "clamp(36px, calc(20.0347px + 2.0815vw), 60px)",
+    "min_px": 36.0,
+    "min_view": 767.0,
+    "max_view": 1920.0,
+    "max_px": 60.0
+  },
+  {
+    "view_range": "1240~1920",
+    "clamp": "clamp(40px, calc(-32.9412px + 5.8824vw), 80px)",
+    "min_px": 40.0,
+    "min_view": 1240.0,
+    "max_view": 1920.0,
+    "max_px": 80.0
+  },
+  {
+    "view_range": "767~1920",
+    "clamp": "clamp(36px, calc(20.0347px + 2.0815vw), 60px)",
+    "min_px": 36.0,
+    "min_view": 767.0,
+    "max_view": 1920.0,
+    "max_px": 60.0
+  },
+  {
+    "view_range": "1240~1920",
+    "clamp": "clamp(40px, calc(-32.9412px + 5.8824vw), 80px)",
+    "min_px": 40.0,
+    "min_view": 1240.0,
+    "max_view": 1920.0,
+    "max_px": 80.0
+  },
+  {
+    "view_range": "767~1400",
+    "clamp": "clamp(20px, calc(-4.2338px + 3.1596vw), 40px)",
+    "min_px": 20.0,
+    "min_view": 767.0,
+    "max_view": 1400.0,
+    "max_px": 40.0
+  },
+  {
+    "view_range": "1240~1920",
+    "clamp": "clamp(40px, calc(-32.9412px + 5.8824vw), 80px)",
+    "min_px": 40.0,
+    "min_view": 1240.0,
+    "max_view": 1920.0,
+    "max_px": 80.0
+  },
+  {
+    "view_range": "767~1920",
+    "clamp": "clamp(36px, calc(20.0347px + 2.0815vw), 60px)",
+    "min_px": 36.0,
+    "min_view": 767.0,
+    "max_view": 1920.0,
+    "max_px": 60.0
+  },
+  {
+    "view_range": "767~1400",
+    "clamp": "clamp(20px, calc(-4.2338px + 3.1596vw), 40px)",
+    "min_px": 20.0,
+    "min_view": 767.0,
+    "max_view": 1400.0,
+    "max_px": 40.0
+  },
+  {
+    "view_range": "767~1920",
+    "clamp": "clamp(36px, calc(20.0347px + 2.0815vw), 60px)",
+    "min_px": 36.0,
+    "min_view": 767.0,
+    "max_view": 1920.0,
+    "max_px": 60.0
+  }
+]

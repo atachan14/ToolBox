@@ -220,8 +220,7 @@ class ClampCalculator(QWidget):
             return
 
         self.success_result(payload)
-        view_range = f"{int(min_view)}~{int(max_view)}"
-        self.tool.history.add_history(view_range, payload)
+        self.tool.history.add_history(payload, min_px, min_view, max_view, max_px)
 
     def reverse_exe(self):
         self.flash_box(self.reverse_box)
@@ -274,6 +273,15 @@ class ClampCalculator(QWidget):
         self.max_view.setText(str(max_view))
 
         self.success_result(text)
+
+
+    def run_from_history(self, entry):
+        self.min_px.setText(str(entry.get("min_px", "")))
+        self.min_view.setText(str(entry.get("min_view", "")))
+        self.max_view.setText(str(entry.get("max_view", "")))
+        self.max_px.setText(str(entry.get("max_px", "")))
+        self.set_last("form")
+        self.min_px.setFocus()
 
     def success_result(self, text: str):
         self._current_result_text = text

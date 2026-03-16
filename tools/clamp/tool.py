@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from PySide6.QtWidgets import  QVBoxLayout, QTabWidget
 
 from tools.clamp.calculator import ClampCalculator
@@ -12,14 +14,20 @@ class Tab(ToolBase):
     
     TOOL_FILES = ["history.json"]
     def __init__(self, folder=None):
-        super().__init__()
+        super().__init__(folder)
+
+        self.folder = Path(folder) if folder else None
 
         layout = QVBoxLayout()
 
         self.tabs = QTabWidget()
-        
+
         self.calculator = ClampCalculator(self)
-        self.history = ClampHistory()
+        history_file = self.folder / "history.json" if self.folder else None
+        self.history = ClampHistory(
+            file_path=history_file,
+            on_item_click=self.calculator.run_from_history,
+        )
 
         self.tabs.addTab(self.calculator, "Calculator")
         self.tabs.addTab(self.history, "History")
