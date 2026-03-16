@@ -20,6 +20,6 @@ def build_clamp(min_px: float, max_px: float, min_view: float, max_view: float) 
     slope_abs = abs(slope)
 
     clamp = (
-        f"clamp({low:g}px, calc({intercept:.4f}px {sign} {slope_abs:.4f}vw), {high:g}px)"
+        f"clamp({low:g}px, calc({intercept:.2f}px {sign} {slope_abs:.2f}vw), {high:g}px)"
     )
     return True, clamp

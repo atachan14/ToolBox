@@ -17,7 +17,8 @@
 
 ## clamp ##
     - preview
-    - history
-        1. historyの[view_range]
-        2. logic改善
-    - self.tool.history.add_history(payload, min_px, min_view, max_view, max_px)はsuccessに置いちゃだめ？
+    - reverseの精度
+    - option
+        - 少数点以下の桁
+        - 文字サイズ（ctrlスクロール対応）
+        

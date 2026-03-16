@@ -290,10 +290,10 @@ class ClampCalculator(QWidget):
 
 
     def run_from_history(self, entry):
-        self.min_px.setText(str(entry.get("min_px", "")))
-        self.min_view.setText(str(entry.get("min_view", "")))
-        self.max_view.setText(str(entry.get("max_view", "")))
-        self.max_px.setText(str(entry.get("max_px", "")))
+        self.min_px.setText(f"{entry.get('min_px', ''):g}")
+        self.min_view.setText(f"{entry.get('min_view', ''):g}")
+        self.max_view.setText(f"{entry.get('max_view', ''):g}")
+        self.max_px.setText(f"{entry.get('max_px', ''):g}")
         self.set_last("form")
         self.min_px.setFocus()
 
@@ -305,6 +305,11 @@ class ClampCalculator(QWidget):
         max_view=None,
         max_px=None,
     ):
+        min_px = f"{min_px:g}"
+        min_view = f"{min_view:g}"
+        max_view = f"{max_view:g}"
+        max_px = f"{max_px:g}"
+        
         self._current_result_text = clamp
         self.result_label.setText(clamp)
 

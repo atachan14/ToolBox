@@ -1,11 +1,13 @@
 import json
 from pathlib import Path
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QListWidget,QApplication,QListWidgetItem, QLabel, QHBoxLayout
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QListWidget,QApplication,QListWidgetItem
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QBrush, QColor
 
 class ClampHistory(QWidget):
+
+    MAX_HISTORY = 50
 
     def __init__(self, file_path=None, on_item_click=None):
         super().__init__()
@@ -48,7 +50,7 @@ class ClampHistory(QWidget):
             return
 
         self.entries.insert(0, entry)
-        self.entries = self.entries[:10]
+        self.entries = self.entries[:self.MAX_HISTORY]
 
         self.render_list()
         self.save_history()
@@ -114,7 +116,7 @@ class ClampHistory(QWidget):
                 }
             )
 
-        self.entries = entries[:10]
+        self.entries = entries[:self.MAX_HISTORY]
         self.render_list()
 
     def save_history(self):
