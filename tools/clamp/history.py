@@ -20,11 +20,11 @@ class ClampHistory(QWidget):
         self.list.setSelectionMode(QListWidget.NoSelection)
         self.list.setWordWrap(True)
         self.list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
-        self.list.setStyleSheet("""
-            QListWidget {
-                font-family: Consolas, monospace;
-            }
-            """)
+        # self.list.setStyleSheet("""
+        #     QListWidget {
+        #         font-family: Consolas, monospace;
+        #     }
+        #     """)
 
         layout.addWidget(self.list)
 

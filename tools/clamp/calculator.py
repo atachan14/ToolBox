@@ -219,12 +219,19 @@ class ClampCalculator(QWidget):
             self.error_result(payload)
             return
 
-        self.success_result(payload)
-        self.tool.history.add_history(payload, min_px, min_view, max_view, max_px)
+        self.success_result(
+            payload,
+            min_px,
+            min_view,
+            max_view,
+            max_px,
+        )
 
     def reverse_exe(self):
         self.flash_box(self.reverse_box)
-        text = self.reverse_input.text().strip().lower().replace(" ", "")
+        original_text = self.reverse_input.text().strip()
+        text = "".join(original_text.lower().split())
+        
         if not text.startswith("clamp(") or not text.endswith(")"):
             self.error_result("error")
             return
@@ -272,7 +279,14 @@ class ClampCalculator(QWidget):
         self.min_view.setText(str(min_view))
         self.max_view.setText(str(max_view))
 
-        self.success_result(text)
+      
+        self.success_result(
+            original_text,
+            min_px,
+            min_view,
+            max_view,
+            max_px,
+        )
 
 
     def run_from_history(self, entry):
@@ -283,15 +297,32 @@ class ClampCalculator(QWidget):
         self.set_last("form")
         self.min_px.setFocus()
 
-    def success_result(self, text: str):
-        self._current_result_text = text
-        self.result_label.setText(text)
+    def success_result(
+        self,
+        clamp: str,
+        min_px=None,
+        min_view=None,
+        max_view=None,
+        max_px=None,
+    ):
+        self._current_result_text = clamp
+        self.result_label.setText(clamp)
 
         self.result_label.setProperty("state", "success")
         self.result_label.style().unpolish(self.result_label)
         self.result_label.style().polish(self.result_label)
 
         self.copy_result()
+
+        # history送信
+        if None not in (min_px, min_view, max_view, max_px):
+            self.tool.history.add_history(
+                clamp,
+                min_px,
+                min_view,
+                max_view,
+                max_px,
+            )
 
     def error_result(self, message: str):
         self._current_result_text = message
