@@ -7,7 +7,6 @@
     - 常に最前に表示
 
 ## markdown ##
-    - menuのレイアウト
     - 改行時のインデント
     - preview
     - import時にTabのリネーム
@@ -17,4 +16,5 @@
     - history
         - クリックでformに送信してexe実行
         - history.jsonに保存
+    
     
