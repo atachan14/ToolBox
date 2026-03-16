@@ -2,7 +2,10 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QTabWidget,
     QWidget,
-    QTabBar
+    QTabBar,
+    QInputDialog,
+    QMessageBox,
+    QMenu
 )
 
 from PySide6.QtCore import QSettings
@@ -73,7 +76,30 @@ class MainWindow(QMainWindow):
 
         self.settings.setValue("geometry", self.saveGeometry())
 
+        self.save_tab_order()
+
         super().closeEvent(event)
+        
+    def save_tab_order(self):
+
+        for i in range(self.tabs.count()):
+
+            tab_name = self.tabs.tabText(i)
+
+            if tab_name == "+":
+                continue
+
+            folder = TABS_DIR / tab_name
+            meta_file = folder / "tool.json"
+
+            if not meta_file.exists():
+                continue
+
+            data = json.loads(meta_file.read_text())
+
+            data["order"] = i
+
+            meta_file.write_text(json.dumps(data, indent=2))
         
     def open_tool(self, tool_class, replace_widget=None):
 
@@ -96,6 +122,8 @@ class MainWindow(QMainWindow):
             
     def restore_tabs(self):
 
+        tabs = []
+
         for folder in TABS_DIR.iterdir():
 
             meta_file = folder / "tool.json"
@@ -105,8 +133,13 @@ class MainWindow(QMainWindow):
 
             data = json.loads(meta_file.read_text())
 
-            tool_name = data.get("tool")
+            tabs.append((data.get("order", 0), folder, data))
 
+        tabs.sort(key=lambda x: x[0])
+
+        for _, folder, data in tabs:
+
+            tool_name = data.get("tool")
             tool_class = self.tools.get(tool_name)
 
             if not tool_class:
@@ -115,8 +148,55 @@ class MainWindow(QMainWindow):
             widget = tool_class(folder)
 
             plus_index = self.tabs.count() - 1
-
             self.tabs.insertTab(plus_index, widget, folder.name)
+        
+    def rename_tab(self, index):
+
+        old_name = self.tabs.tabText(index)
+
+        new_name, ok = QInputDialog.getText(
+            self,
+            "Rename Tab",
+            "New name:",
+            text=old_name
+        )
+
+        if not ok:
+            return
+
+        new_name = new_name.strip()
+
+        if not new_name:
+            return
+
+        invalid_chars = r'\/:*?"<>|'
+
+        if any(c in new_name for c in invalid_chars):
+            QMessageBox.warning(
+                self,
+                "Invalid Name",
+                "Tab名に使用できない文字が含まれています。"
+            )
+            return
+
+        old_path = TABS_DIR / old_name
+        new_path = TABS_DIR / new_name
+
+        if new_path.exists():
+            QMessageBox.warning(
+                self,
+                "Name Exists",
+                "同じTab名は利用できません"
+            )
+            return
+
+        try:
+            old_path.rename(new_path)
+        except OSError:
+            QMessageBox.warning(self, "Error", "Rename failed.")
+            return
+
+        self.tabs.setTabText(index, new_name)
                 
 class FixedTabBar(QTabBar):
 
@@ -129,3 +209,27 @@ class FixedTabBar(QTabBar):
             return
 
         super().mousePressEvent(event)
+        
+    def contextMenuEvent(self, event):
+
+        index = self.tabAt(event.pos())
+
+        if index < 0:
+            return
+
+        if self.tabText(index) == "+":
+            return
+
+        menu = QMenu(self)
+
+        rename = menu.addAction("Rename")
+        close = menu.addAction("Close")
+
+        action = menu.exec(event.globalPos())
+
+        if action == rename:
+            self.window().rename_tab(index)
+
+        if action == close:
+            self.window().close_tab(index)
+            

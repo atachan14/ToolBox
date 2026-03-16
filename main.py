@@ -7,11 +7,21 @@ from core.update import (
     extract_update,
     launch_updater
 )
-
+from PySide6.QtGui import QIcon
+from pathlib import Path
+import ctypes
 
 def main():
 
+    if sys.platform == "win32":
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("toolbox.app")
+
     app = QApplication(sys.argv)
+
+    icon_path = Path(__file__).parent / "toolbox.ico"
+    icon = QIcon(str(icon_path))
+
+    app.setWindowIcon(icon)
 
     update = check_update()
 
@@ -32,6 +42,7 @@ def main():
             launch_updater(extract_dir)
 
     window = MainWindow()
+    window.setWindowIcon(icon)
     window.show()
 
     sys.exit(app.exec())
