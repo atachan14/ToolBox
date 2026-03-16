@@ -6,11 +6,12 @@ from PySide6.QtWidgets import (
 )
 
 from PySide6.QtCore import QSettings
-from core.new_tab import NewTab
+from core.plus_tab import PlusTab
 from core.tool_loader import load_tools
 from core.paths import TABS_DIR
 from core.tab_storage import create_tab_folder
 import json
+import shutil
 
 class MainWindow(QMainWindow):
 
@@ -29,7 +30,6 @@ class MainWindow(QMainWindow):
         self.tabs.setTabsClosable(True)
         
         self.tabs.tabCloseRequested.connect(self.close_tab)
-        self.tabs.tabBarClicked.connect(self.handle_tab_click)
 
         self.setCentralWidget(self.tabs)
 
@@ -46,7 +46,7 @@ class MainWindow(QMainWindow):
 
     def add_plus_tab(self):
 
-        plus_tab = QWidget()
+        plus_tab = PlusTab(self)
 
         index = self.tabs.addTab(plus_tab, "+")
 
@@ -56,27 +56,16 @@ class MainWindow(QMainWindow):
             None
         )
 
-
-    def handle_tab_click(self, index):
-
-        if self.tabs.tabText(index) != "+":
-            return
-
-        self.open_new_tab()
-
-    def open_new_tab(self):
-
-        plus_index = self.tabs.count() - 1
-
-        widget = NewTab(self)
-
-        self.tabs.insertTab(plus_index, widget, "New")
-        self.tabs.setCurrentIndex(plus_index)
-
     def close_tab(self, index):
 
         if self.tabs.tabText(index) == "+":
             return
+
+        tab_name = self.tabs.tabText(index)
+        tab_folder = TABS_DIR / tab_name
+
+        if tab_folder.exists() and tab_folder.is_dir():
+            shutil.rmtree(tab_folder)
 
         self.tabs.removeTab(index)
         
@@ -90,7 +79,7 @@ class MainWindow(QMainWindow):
 
         tab_name, folder = create_tab_folder(tool_class)
 
-        widget = tool_class(folder)   # ← folder渡す
+        widget = tool_class(folder)
 
         if replace_widget:
             index = self.tabs.indexOf(replace_widget)

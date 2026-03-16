@@ -18,7 +18,7 @@ def check_update():
 
         local = VERSION
 
-        r = requests.get(API)
+        r = requests.get(API, timeout=3)
         r.raise_for_status()
 
         release = r.json()
@@ -45,7 +45,7 @@ def download_update(url):
     temp_dir = tempfile.mkdtemp()
     zip_path = Path(temp_dir) / "update.zip"
 
-    r = requests.get(url, stream=True)
+    r = requests.get(url, stream=True, timeout=3)
     r.raise_for_status()
 
     with open(zip_path, "wb") as f:
