@@ -9,7 +9,7 @@ def apply_update(extract_dir, base_dir):
 
     new_dir = next(Path(extract_dir).glob("ToolBox*"))
 
-    time.sleep(1)
+    time.sleep(2)
 
     for item in new_dir.iterdir():
 

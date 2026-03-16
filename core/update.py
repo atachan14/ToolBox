@@ -24,7 +24,7 @@ def check_update():
         release = r.json()
         latest = release["tag_name"].lstrip("v")
 
-        if latest == local:
+        if latest <= local:
             return None
 
         for asset in release["assets"]:
@@ -68,11 +68,14 @@ def extract_update(zip_path):
 def launch_updater(extract_dir):
 
     base = Path(sys.executable).parent
+    updater = base / "updater.exe"
+
+    if not updater.exists():
+        print("updater.exe not found")
+        return
 
     subprocess.Popen([
-        sys.executable,
-        "-m",
-        "core.updater",
+        updater,
         str(extract_dir),
         str(base)
     ])
