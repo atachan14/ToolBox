@@ -1,5 +1,7 @@
 import sys
 from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtGui import QIcon
+
 from core.window import MainWindow
 from core.update import (
     check_update,
@@ -7,9 +9,11 @@ from core.update import (
     extract_update,
     launch_updater
 )
-from PySide6.QtGui import QIcon
+from core.theme import apply_dark_theme
+
 from pathlib import Path
 import ctypes
+from qt_material import apply_stylesheet
 
 def main():
 
@@ -17,6 +21,8 @@ def main():
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("toolbox.app")
 
     app = QApplication(sys.argv)
+    
+    # apply_dark_theme(app)
     
     qss_path = Path(__file__).parent / "toolbox.qss"
 
@@ -55,3 +61,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+    
