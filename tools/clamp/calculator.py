@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer, Qt,QEvent
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QKeySequence, QShortcut,QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
     QFormLayout,
@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
+    QLabel
 )
 
 from .logic import build_clamp
@@ -72,10 +74,12 @@ class ClampCalculator(QWidget):
         layout.addStretch()
         
         # result button
-        self.result_button = QPushButton(self._current_result_text)
-        self.result_button.setFlat(True)
-        self.result_button.setProperty("state", "start")
-        layout.addWidget(self.result_button)
+        self.result_label = QLabel(self._current_result_text)
+        self.result_label.setWordWrap(True)
+        self.result_label.setProperty("state", "start")
+        self.result_label.setCursor(Qt.PointingHandCursor)
+ 
+        layout.addWidget(self.result_label)
 
         ## 余白はここ
         layout.addStretch()
@@ -87,7 +91,7 @@ class ClampCalculator(QWidget):
         reverse_layout.setContentsMargins(0, 0, 0, 0)
 
         self.reverse_input = QLineEdit()
-        self.reverse_input.setPlaceholderText("clamp(...)")
+        self.reverse_input.setPlaceholderText("reverse...")
         self.reverse_input.setClearButtonEnabled(True)
         reverse_layout.addWidget(self.reverse_input)
         layout.addWidget(self.reverse_box)
@@ -105,15 +109,15 @@ class ClampCalculator(QWidget):
                 border: 1px solid #4ecdc4;
                 background: rgba(78, 205, 196, 0.12);
             }
-            QPushButton[state="error"] { color: #ff6b6b; }
-            QPushButton[state="copied"] { color: #4ecdc4; }
+            QLabel[state="error"] { color: #ff6b6b; }
+            QLabel[state="copied"] { color: #4ecdc4; }
             """
         )
 
     def setup_signals(self):
         self.calc_button.clicked.connect(self.calc_exe)
         self.reset_button.clicked.connect(self.reset_all)
-        self.result_button.clicked.connect(self.copy_result)
+        self.result_label.mousePressEvent = lambda e: self.copy_result()
 
         self.free_input.installEventFilter(self)
         for w in (self.min_px, self.max_px, self.min_view, self.max_view):
@@ -148,7 +152,7 @@ class ClampCalculator(QWidget):
             self.reverse_exe()
         elif focus == self.reset_button:
             self.reset_all()
-        elif focus == self.result_button:
+        elif focus == self.result_label:
             self.copy_result()
         else:
             self.calc_exe()
@@ -273,37 +277,39 @@ class ClampCalculator(QWidget):
 
     def success_result(self, text: str):
         self._current_result_text = text
-        self.result_button.setText(text)
-        self.result_button.setProperty("state", "success")
-        self.result_button.style().unpolish(self.result_button)
-        self.result_button.style().polish(self.result_button)
+        self.result_label.setText(text)
+
+        self.result_label.setProperty("state", "success")
+        self.result_label.style().unpolish(self.result_label)
+        self.result_label.style().polish(self.result_label)
+
         self.copy_result()
 
     def error_result(self, message: str):
         self._current_result_text = message
-        self.result_button.setText(message)
-        self.result_button.setProperty("state", "error")
-        self.result_button.style().unpolish(self.result_button)
-        self.result_button.style().polish(self.result_button)
+        self.result_label.setText(message)
+        self.result_label.setProperty("state", "error")
+        self.result_label.style().unpolish(self.result_label)
+        self.result_label.style().polish(self.result_label)
 
     def copy_result(self):
-        if self.result_button.property("state") != "success":
+        if self.result_label.property("state") != "success":
             return
 
         QApplication.clipboard().setText(self._current_result_text)
 
-        self.result_button.setProperty("state", "copied")
-        self.result_button.setText("Copied!")
-        self.result_button.style().unpolish(self.result_button)
-        self.result_button.style().polish(self.result_button)
+        self.result_label.setProperty("state", "copied")
+        self.result_label.setText("Copied!")
+        self.result_label.style().unpolish(self.result_label)
+        self.result_label.style().polish(self.result_label)
 
         QTimer.singleShot(600, self.restore_result)
 
     def restore_result(self):
-        self.result_button.setText(self._current_result_text)
-        self.result_button.setProperty("state", "success")
-        self.result_button.style().unpolish(self.result_button)
-        self.result_button.style().polish(self.result_button)
+        self.result_label.setText(self._current_result_text)
+        self.result_label.setProperty("state", "success")
+        self.result_label.style().unpolish(self.result_label)
+        self.result_label.style().polish(self.result_label)
 
     def reset_all(self):
         self.free_input.clear()
@@ -314,10 +320,10 @@ class ClampCalculator(QWidget):
         self.reverse_input.clear()
 
         self._current_result_text = "clamp(...)"
-        self.result_button.setText(self._current_result_text)
-        self.result_button.setProperty("state", "start")
-        self.result_button.style().unpolish(self.result_button)
-        self.result_button.style().polish(self.result_button)
+        self.result_label.setText(self._current_result_text)
+        self.result_label.setProperty("state", "start")
+        self.result_label.style().unpolish(self.result_label)
+        self.result_label.style().polish(self.result_label)
 
         for box in (self.free_box, self.form_box, self.reverse_box):
             self._reset_box_state(box)

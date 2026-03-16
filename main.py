@@ -17,6 +17,11 @@ def main():
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("toolbox.app")
 
     app = QApplication(sys.argv)
+    
+    qss_path = Path(__file__).parent / "toolbox.qss"
+
+    with open(qss_path, "r", encoding="utf-8") as f:
+        app.setStyleSheet(f.read())
 
     icon_path = Path(__file__).parent / "toolbox.ico"
     icon = QIcon(str(icon_path))
