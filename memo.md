@@ -7,7 +7,6 @@
     - 常に最前に表示
 
 ## markdown ##
-    - 改行時のインデント
     - preview
     - import時にTabのリネーム
     - export時にTab名をファイル名にする。
