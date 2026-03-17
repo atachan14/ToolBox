@@ -12,6 +12,7 @@ from core.update import (
 
 from pathlib import Path
 import ctypes
+import time
 
 def main():
 
@@ -50,6 +51,11 @@ def main():
             extract_dir = extract_update(zip_path)
 
             launch_updater(extract_dir)
+            
+            QApplication.quit()
+            time.sleep(1)  # ← これ追加
+
+            sys.exit()
 
     window = MainWindow()
     window.setWindowIcon(icon)

@@ -4,6 +4,7 @@
     - 終了時に開いてたタブを再起動時に開く
     - 閉じたタブの復元
     - 常に最前に表示
+    - F2でリネーム
 
     - success_colorとerror_color
     - color調整
