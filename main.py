@@ -9,11 +9,9 @@ from core.update import (
     extract_update,
     launch_updater
 )
-from core.theme import apply_dark_theme
 
 from pathlib import Path
 import ctypes
-from qt_material import apply_stylesheet
 
 def main():
 
@@ -22,11 +20,12 @@ def main():
 
     app = QApplication(sys.argv)
     
-    # apply_dark_theme(app)
-    
     qss_path = Path(__file__).parent / "toolbox.qss"
 
-    with open(qss_path, "r", encoding="utf-8") as f:
+    with open(qss_path, encoding="utf-8") as f:
+        app.setStyleSheet(f.read())
+
+    with open(qss_path, encoding="utf-8") as f:
         app.setStyleSheet(f.read())
 
     icon_path = Path(__file__).parent / "toolbox.ico"

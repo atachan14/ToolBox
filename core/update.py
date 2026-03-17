@@ -9,22 +9,20 @@ from core.version import VERSION
 REPO = "atachan14/ToolBox"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
 
-
-
+def parse_version(v):
+    return tuple(map(int, v.split(".")))
 
 def check_update():
-
     try:
-
-        local = VERSION
+        local = VERSION.strip()
 
         r = requests.get(API, timeout=3)
         r.raise_for_status()
 
         release = r.json()
-        latest = release["tag_name"].lstrip("v")
+        latest = release["tag_name"].lstrip("v").strip()
 
-        if latest <= local:
+        if parse_version(latest) <= parse_version(local):
             return None
 
         for asset in release["assets"]:
