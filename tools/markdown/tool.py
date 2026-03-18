@@ -28,11 +28,12 @@ class Tab(ToolBase):
         self.toggle_bar.clicked.connect(self.toggle_menu)
         self.toggle_bar.setStyleSheet("""
         QPushButton {
-            border:none;
-            border-top:1px solid #333;
-            border-bottom:1px solid #333;
-            background:#222;
-            font-size:12px;
+            border: none;
+            border-top: 1px solid palette(mid);
+            border-bottom: 1px solid palette(mid);
+            background: palette(button);
+            color: palette(button-text);
+            font-size: 12px;
         }
         """)
         self.toggle_bar.setCursor(Qt.PointingHandCursor)
@@ -126,11 +127,11 @@ class Tab(ToolBase):
         if current == 0:
             start = 0
             end = self.menu_height
-            self.toggle_bar.setText("▲")
+            self.toggle_bar.setText("▼")
         else:
             start = self.menu_height
             end = 0
-            self.toggle_bar.setText("▼")
+            self.toggle_bar.setText("▲")
 
         self.menu_anim.stop()
         self.menu_anim.setStartValue(start)

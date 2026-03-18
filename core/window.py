@@ -28,6 +28,7 @@ class MainWindow(QMainWindow):
         
         self.always_on_top = False
         QShortcut(QKeySequence("Alt+W"), self, self.toggle_always_on_top)
+        QShortcut(QKeySequence("F2"), self, self.rename_current_hover_tab)
 
         self.tools = load_tools()
 
@@ -215,6 +216,22 @@ class MainWindow(QMainWindow):
 
         self.tabs.setTabText(index, new_name)
         
+    def rename_current_hover_tab(self):
+
+        tabbar = self.tabs.tabBar()
+        index = tabbar.hovered_index
+        if index < 0:
+            index = self.tabs.currentIndex()
+
+        if index < 0:
+            return
+
+        if self.tabs.tabText(index) == "+":
+            return
+
+        self.rename_tab(index)
+
+    # WindowStaysOnTopHintだと切り替え時にチラつくためwin32guiを使用        
     def toggle_always_on_top(self):
         self.always_on_top = not self.always_on_top
 
@@ -246,7 +263,16 @@ class MainWindow(QMainWindow):
             self.wrapper.setStyleSheet("")
                 
 class FixedTabBar(QTabBar):
+    
+    def __init__(self):
+        super().__init__()
+        self.hovered_index = -1
+        self.setMouseTracking(True)
 
+    def mouseMoveEvent(self, event):
+        self.hovered_index = self.tabAt(event.pos())
+        super().mouseMoveEvent(event)
+        
     def mousePressEvent(self, event):
 
         index = self.tabAt(event.pos())
