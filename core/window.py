@@ -5,10 +5,13 @@ from PySide6.QtWidgets import (
     QTabBar,
     QInputDialog,
     QMessageBox,
-    QMenu
+    QMenu,
+    QVBoxLayout,
 )
-
+from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtCore import QSettings
+import win32gui
+import win32con
 from core.plus_tab import PlusTab
 from core.tool_loader import load_tools
 from core.paths import TABS_DIR
@@ -17,10 +20,15 @@ import json
 import shutil
 
 class MainWindow(QMainWindow):
+    
+
 
     def __init__(self):
         super().__init__()
         
+        self.always_on_top = False
+        QShortcut(QKeySequence("Alt+W"), self, self.toggle_always_on_top)
+
         self.tools = load_tools()
 
         self.settings = QSettings("toolbox", "toolbox")
@@ -34,7 +42,16 @@ class MainWindow(QMainWindow):
         
         self.tabs.tabCloseRequested.connect(self.close_tab)
 
-        self.setCentralWidget(self.tabs)
+        # --- wrapper作成 ---
+        wrapper = QWidget()
+        wrapper.setObjectName("window_frame")  # ←これ追加
+        layout = QVBoxLayout(wrapper)
+        layout.setContentsMargins(3, 3, 3, 3)  # ←これが“枠の太さ”
+        layout.addWidget(self.tabs)
+
+        self.wrapper = wrapper  # ←後で使うから保持
+
+        self.setCentralWidget(wrapper)
 
         self.add_plus_tab()
         
@@ -197,6 +214,36 @@ class MainWindow(QMainWindow):
             return
 
         self.tabs.setTabText(index, new_name)
+        
+    def toggle_always_on_top(self):
+        self.always_on_top = not self.always_on_top
+
+        hwnd = int(self.winId())
+
+        if self.always_on_top:
+            win32gui.SetWindowPos(
+                hwnd,
+                win32con.HWND_TOPMOST,
+                0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+            )
+        else:
+            win32gui.SetWindowPos(
+                hwnd,
+                win32con.HWND_NOTOPMOST,
+                0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+            )
+
+        # 見た目更新（今までのやつそのまま使える）
+        if self.always_on_top:
+            self.wrapper.setStyleSheet("""
+                #window_frame {
+                    border-top: 3px solid #4ecdc4;
+                }
+            """)
+        else:
+            self.wrapper.setStyleSheet("")
                 
 class FixedTabBar(QTabBar):
 

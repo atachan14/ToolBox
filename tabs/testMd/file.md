@@ -9,7 +9,7 @@ test
 			- test
 	**test**
 	*italic*
-	**bold and italic**
+	***old and italic***
 	*イタリック*
 	[link](url)
 	
