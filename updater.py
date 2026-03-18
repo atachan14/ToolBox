@@ -31,7 +31,7 @@ def apply_update(extract_dir, base_dir):
 
     for item in new_dir.iterdir():
 
-        if item.name in ["tabs", current_exe]:
+        if item.name == "updater.exe":
             continue
 
         dest = base_dir / item.name

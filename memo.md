@@ -1,12 +1,11 @@
 # 追加予定 #
 ## core ##
     - タブを外にドラッグして別Windowにする。
-    - 終了時に開いてたタブを再起動時に開く
+    - 終了時に開いてたタブを再起動時に選択
     - 閉じたタブの復元
-    - 常に最前に表示
     - F2でリネーム
 
-    - success_colorとerror_color
+    - ToolsのPlugin化（設定保存用）
     - color調整
 
 ## markdown ##
@@ -17,8 +16,8 @@
     - 外のファイルと同期（？）するモード
 
 ## clamp ##
-    - preview
     - reverseの精度
+    - preview
     - option
         - 少数点以下の桁
         - 文字サイズ（ctrlスクロール対応）

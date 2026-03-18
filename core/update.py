@@ -16,7 +16,7 @@ def check_update():
     try:
         local = VERSION.strip()
 
-        r = requests.get(API, timeout=3)
+        r = requests.get(API, timeout=5)
         r.raise_for_status()
 
         release = r.json()

@@ -26,8 +26,6 @@ def main():
     with open(qss_path, encoding="utf-8") as f:
         app.setStyleSheet(f.read())
 
-    with open(qss_path, encoding="utf-8") as f:
-        app.setStyleSheet(f.read())
 
     icon_path = Path(__file__).parent / "toolbox.ico"
     icon = QIcon(str(icon_path))
@@ -53,8 +51,6 @@ def main():
             launch_updater(extract_dir)
             
             QApplication.quit()
-            time.sleep(1)  # ← これ追加
-
             sys.exit()
 
     window = MainWindow()
