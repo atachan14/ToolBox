@@ -10,7 +10,7 @@
 
 ## markdown ##
     - editor
-        "*"のペア
+        - ショートカット改善
     - import時にTabのリネーム（重複時index）
     - ドラッグでimport
     - export時にTab名をファイル名にする。
@@ -30,8 +30,8 @@
 
 
 # 新規Tool案 #
+    - Clip-path Polygon Editor
+    - linear-gradient
     - クリップボード
     - カラーピック
     - ギター指盤コード逆引き
-    - Clip-path Polygon Editor
-    

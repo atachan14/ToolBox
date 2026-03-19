@@ -35,4 +35,4 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         for pattern, fmt in self.rules:
             for match in pattern.finditer(text):
                 start, end = match.span()
-                self.setFormat(start, end-start, fmt)
+                self.setFormat(start, end - start, fmt)

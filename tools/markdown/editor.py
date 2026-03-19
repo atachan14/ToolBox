@@ -1,38 +1,28 @@
-from PySide6.QtWidgets import QPlainTextEdit,QCompleter
-from PySide6.QtCore import Qt,QStringListModel
-from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import QPlainTextEdit
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QTextCursor,QPainter, QPen, QColor,QFont
 from .highlighter import MarkdownHighlighter
-from core.paths import TABS_DIR
 import re
 
 class MarkdownEditor(QPlainTextEdit):
-    
+
     INDENT = "\t"
-    PAIRS = {
-    "(": ")",
-    "[": "]",
-    "{": "}",
-    '"': '"',
-    "_": "_",
-}
-    SNIPPETS = {
-    "table": "| col1 | col2 |\n|------|------|\n| text | text |",
-    "img": "![alt](image.png)",
-    "link": "[text](url)",
-    "code": "```\n\n```",
-}
-    
+
     def __init__(self):
         super().__init__()
 
         MarkdownHighlighter(self.document())
-        self.setTabStopDistance(20)
-        
-        model = QStringListModel(list(self.SNIPPETS.keys()))
 
-        self.completer = QCompleter(model, self)
-        self.completer.setWidget(self)
-        self.completer.activated.connect(self.insert_snippet)
+        self.setTabStopDistance(
+            self.fontMetrics().horizontalAdvance(" ") * 4
+        )
+        
+        self.indent_colors = [
+            QColor("#ff6b6b"),  # 赤
+            QColor("#ffd43b"),  # 黄
+            QColor("#40c057"),  # 緑
+            QColor("#845ef7"),  # 紫
+        ]
         
     def wheelEvent(self, event):
 
@@ -68,34 +58,6 @@ class MarkdownEditor(QPlainTextEdit):
                 return
         text = event.text()
 
-        if text in self.PAIRS:
-
-            cursor = self.textCursor()
-            close = self.PAIRS[text]
-
-            # 選択あり → wrap
-            if cursor.hasSelection():
-                selected = cursor.selectedText()
-                cursor.insertText(text + selected + close)
-                return
-
-            # 次の文字が閉じ記号ならスキップ
-            cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, 1)
-            next_char = cursor.selectedText()
-            cursor.clearSelection()
-
-            if next_char == close:
-                cursor.movePosition(QTextCursor.Right)
-                self.setTextCursor(cursor)
-                return
-
-            # 通常ペア補完
-            cursor.insertText(text + close)
-            cursor.movePosition(QTextCursor.Left)
-            self.setTextCursor(cursor)
-
-            return
-        
         if event.modifiers() & Qt.ControlModifier:
 
             if event.key() == Qt.Key_B:
@@ -140,12 +102,6 @@ class MarkdownEditor(QPlainTextEdit):
             self.continue_prefix()
             return
         
-        if (event.modifiers() & Qt.ControlModifier) and event.key() == Qt.Key_Space:
-            cursor_rect = self.cursorRect()
-            self.completer.complete(cursor_rect)
-
-            return
-
         if event.key() == Qt.Key_Tab:
             cursor = self.textCursor()
 
@@ -400,17 +356,60 @@ class MarkdownEditor(QPlainTextEdit):
 
         cursor.insertText("\n" + prefix)
         
-    def insert_snippet(self, key):
+    def paintEvent(self, event):
+        super().paintEvent(event)
 
-        snippet = self.SNIPPETS.get(key)
+        painter = QPainter(self.viewport())
 
-        if not snippet:
-            return
+        block = self.firstVisibleBlock()
+        offset = self.contentOffset()
 
-        cursor = self.textCursor()
+        tab_width = self.tabStopDistance()
 
-        cursor.insertText(snippet)
+        while block.isValid():
+            rect = self.blockBoundingGeometry(block).translated(offset)
 
-        if key == "code":
-            cursor.movePosition(QTextCursor.Up)
-            self.setTextCursor(cursor)
+            if not rect.isValid():
+                block = block.next()
+                continue
+
+            text = block.text()
+
+            # インデント数
+            indent = 0
+            i = 0
+            length = len(text)
+
+            while i < length:
+
+                if text[i] == "\t":
+                    indent += 1
+                    i += 1
+
+                elif text[i:i+4] == "    ":
+                    indent += 1
+                    i += 4
+
+                else:
+                    break
+
+            # 縦ライン描画
+            for i in range(indent):
+                base = self.indent_colors[i % len(self.indent_colors)]
+                color = QColor(base)
+                color.setAlpha(50)
+
+                pen = QPen(color)
+                pen.setWidth(1)
+                painter.setPen(pen)
+
+                x = int(tab_width * i)
+
+                painter.drawLine(
+                    x,
+                    int(rect.top()),
+                    x,
+                    int(rect.bottom())
+                )
+
+            block = block.next()
