@@ -420,7 +420,7 @@ class MarkdownEditor(QPlainTextEdit):
                 )
 
             block = block.next()
-            
+
     def tree_diagram(self):
 
         cursor = self.textCursor()
@@ -428,7 +428,34 @@ class MarkdownEditor(QPlainTextEdit):
         if not cursor.hasSelection():
             return
 
+        start = cursor.selectionStart()
+
         text = cursor.selection().toPlainText()
+
+        if self._is_tree(text):
+            new_text = self.to_indent(text)
+        else:
+            new_text = self.to_tree(text)
+
+        # 置換
+        cursor.insertText(new_text)
+
+        # ★再選択
+        new_cursor = self.textCursor()
+        new_cursor.setPosition(start)
+        new_cursor.setPosition(start + len(new_text), QTextCursor.KeepAnchor)
+        self.setTextCursor(new_cursor)
+
+
+    def _is_tree(self, text):
+        return any(sym in text for sym in ["├", "└", "│"])
+
+
+    # -------------------------------
+    # インデント → ツリー
+    # -------------------------------
+    def to_tree(self, text):
+
         lines = text.splitlines()
 
         def get_indent(line):
@@ -465,7 +492,7 @@ class MarkdownEditor(QPlainTextEdit):
             while len(stack) > level:
                 stack.pop()
 
-            # 次に同階層があるかチェック
+            # 同階層チェック
             is_last = True
             for j in range(i + 1, len(parsed)):
                 nl, _ = parsed[j]
@@ -475,6 +502,7 @@ class MarkdownEditor(QPlainTextEdit):
                 if nl < level:
                     break
 
+            # prefix
             prefix = ""
             for depth in range(level - 1):
                 if depth < len(stack) and stack[depth]:
@@ -490,4 +518,40 @@ class MarkdownEditor(QPlainTextEdit):
             else:
                 stack[level - 1] = not is_last
 
-        cursor.insertText("\n".join(result))
+        return "\n".join(result)
+
+
+    # -------------------------------
+    # ツリー → インデント
+    # -------------------------------
+    def to_indent(self, text):
+
+        lines = text.splitlines()
+        result = []
+
+        for line in lines:
+
+            if not line.strip():
+                result.append("")
+                continue
+
+            # root行
+            if not any(sym in line for sym in ["├", "└"]):
+                result.append(line.strip())
+                continue
+
+            # prefix取得
+            idx = line.find("├")
+            if idx == -1:
+                idx = line.find("└")
+
+            prefix = line[:idx]
+
+            # ★ここ修正
+            level = (len(prefix) // 4) + 1
+
+            content = line[idx + 2:].strip()
+
+            result.append("\t" * level + content)
+
+        return "\n".join(result)
