@@ -9,17 +9,13 @@
     - color調整
 
 ## markdown ##
-    - editor
-        - ショートカット改善
     - import時にTabのリネーム（重複時index）
     - ドラッグでimport
     - export時にTab名をファイル名にする。
     - 外のファイルと同期（？）するモード
-    - インデントに背景色。
     - option
         - color
         - shortcut
-    - to tree
 
 ## clamp ##
     - reverseの精度
@@ -37,20 +33,3 @@
     - カラーピック
     - ギター指盤コード逆引き
 
-
-test
-├─ test
-│   └─ test
-└─ test
-    ├─ test
-    ├─ test
-    │   ├─ test
-    │   │   └─ test
-    │   └─ test
-    └─ test
-        └─ test
-test
-├─ test
-└─ test
-    └─ test
-        └─ test

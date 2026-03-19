@@ -259,17 +259,60 @@ class ClampCalculator(QWidget):
 
             base_px = float(px_part.replace("px", ""))
             vw = float(vw_part.replace("vw", "")) * sign
+
             if vw == 0:
                 raise ValueError("vw cannot be zero")
 
-            min_view = (min_px - base_px) / vw * 100
-            max_view = (max_px - base_px) / vw * 100
+            # 👇 まずfloatで算出
+            min_view_f = (min_px - base_px) / vw * 100
+            max_view_f = (max_px - base_px) / vw * 100
 
-            min_view = int(round(min_view))
-            max_view = int(round(max_view))
+            # 👇 clamp再計算用（ローカル関数）
+            def calc_clamp(min_px, min_view, max_view, max_px):
+                slope = (max_px - min_px) / (max_view - min_view) * 100
+                base = min_px - slope * (min_view / 100)
+                return base, slope
+
+            # 👇 周辺探索（ここが本体）
+            candidates = []
+
+            for dv_min in range(-2, 3):
+                for dv_max in range(-2, 3):
+                    test_min_view = int(round(min_view_f)) + dv_min
+                    test_max_view = int(round(max_view_f)) + dv_max
+
+                    if test_min_view >= test_max_view:
+                        continue
+
+                    base, slope = calc_clamp(min_px, test_min_view, test_max_view, max_px)
+
+                    # clamp再現
+                    re_base, re_slope = base, slope
+
+                    # 誤差初期化（←これ大事）
+                    error = (
+                        abs(base_px - re_base) * 50 +
+                        abs(vw - re_slope) * 50
+                    )
+
+                    # min側チェック
+                    calc_min = re_base + re_slope * (test_min_view / 100)
+                    # max側チェック
+                    calc_max = re_base + re_slope * (test_max_view / 100)
+
+                    error += abs(calc_min - min_px) * 100
+                    error += abs(calc_max - max_px) * 100
+
+                    candidates.append((error, test_min_view, test_max_view))
+
+            if not candidates:
+                raise ValueError("no candidates")
+
+            _, min_view, max_view = min(candidates, key=lambda x: x[0])
 
             pairs = sorted([(min_view, min_px), (max_view, max_px)])
             (min_view, min_px), (max_view, max_px) = pairs
+
         except (ValueError, ZeroDivisionError):
             self.error_result("error")
             return
@@ -279,7 +322,6 @@ class ClampCalculator(QWidget):
         self.min_view.setText(str(min_view))
         self.max_view.setText(str(max_view))
 
-      
         self.success_result(
             original_text,
             min_px,
@@ -288,12 +330,11 @@ class ClampCalculator(QWidget):
             max_px,
         )
 
-
     def run_from_history(self, entry):
-        self.min_px.setText(f"{entry.get('min_px', ''):g}")
-        self.min_view.setText(f"{entry.get('min_view', ''):g}")
-        self.max_view.setText(f"{entry.get('max_view', ''):g}")
-        self.max_px.setText(f"{entry.get('max_px', ''):g}")
+        self.min_px.setText(f"{float(entry.get('min_px', 0)):g}")
+        self.min_view.setText(f"{int(entry.get('min_view', 0))}")
+        self.max_view.setText(f"{int(entry.get('max_view', 0))}")
+        self.max_px.setText(f"{float(entry.get('max_px', 0)):g}")
         self.set_last("form")
         self.min_px.setFocus()
 
