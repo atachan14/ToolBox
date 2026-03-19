@@ -19,6 +19,7 @@
     - option
         - color
         - shortcut
+    - to tree
 
 ## clamp ##
     - reverseの精度
@@ -35,3 +36,21 @@
     - クリップボード
     - カラーピック
     - ギター指盤コード逆引き
+
+
+test
+├─ test
+│   └─ test
+└─ test
+    ├─ test
+    ├─ test
+    │   ├─ test
+    │   │   └─ test
+    │   └─ test
+    └─ test
+        └─ test
+test
+├─ test
+└─ test
+    └─ test
+        └─ test

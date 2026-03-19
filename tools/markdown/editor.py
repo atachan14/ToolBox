@@ -11,6 +11,10 @@ class MarkdownEditor(QPlainTextEdit):
     def __init__(self):
         super().__init__()
 
+        font = QFont("JetBrains Mono")
+        font.setStyleHint(QFont.Monospace)
+        self.setFont(font)
+
         MarkdownHighlighter(self.document())
 
         self.setTabStopDistance(
@@ -58,7 +62,17 @@ class MarkdownEditor(QPlainTextEdit):
                 return
         text = event.text()
 
-        if event.modifiers() & Qt.ControlModifier:
+        if (event.modifiers() & Qt.ControlModifier) and (event.modifiers() & Qt.ShiftModifier):
+
+            if event.key() == Qt.Key_T:
+                self.tree_diagram()
+
+            if event.key() == Qt.Key_D:
+                self.wrap_selection("***")
+                return
+            if event.key() == Qt.Key_C:
+                self.insert_code_block()
+                return
 
             if event.key() == Qt.Key_B:
                 self.wrap_selection("**")
@@ -89,14 +103,7 @@ class MarkdownEditor(QPlainTextEdit):
                 return
             
             
-        if (event.modifiers() & Qt.ControlModifier) and (event.modifiers() & Qt.ShiftModifier):
 
-            if event.key() == Qt.Key_B:
-                self.wrap_selection("***")
-                return
-            if event.key() == Qt.Key_K:
-                self.insert_code_block()
-                return
 
         if (event.modifiers() & Qt.ControlModifier) and event.key() in (Qt.Key_Return, Qt.Key_Enter):
             self.continue_prefix()
@@ -413,3 +420,74 @@ class MarkdownEditor(QPlainTextEdit):
                 )
 
             block = block.next()
+            
+    def tree_diagram(self):
+
+        cursor = self.textCursor()
+
+        if not cursor.hasSelection():
+            return
+
+        text = cursor.selection().toPlainText()
+        lines = text.splitlines()
+
+        def get_indent(line):
+            count = 0
+            for ch in line:
+                if ch == " ":
+                    count += 1
+                elif ch == "\t":
+                    count += 4
+                else:
+                    break
+            return count
+
+        parsed = []
+        for line in lines:
+            if not line.strip():
+                continue
+
+            indent = get_indent(line)
+            level = indent // 4
+            parsed.append((level, line.strip()))
+
+        result = []
+        stack = []
+
+        for i, (level, content) in enumerate(parsed):
+
+            if level == 0:
+                result.append(content)
+                stack = []
+                continue
+
+            # stack調整
+            while len(stack) > level:
+                stack.pop()
+
+            # 次に同階層があるかチェック
+            is_last = True
+            for j in range(i + 1, len(parsed)):
+                nl, _ = parsed[j]
+                if nl == level:
+                    is_last = False
+                    break
+                if nl < level:
+                    break
+
+            prefix = ""
+            for depth in range(level - 1):
+                if depth < len(stack) and stack[depth]:
+                    prefix += "│   "
+                else:
+                    prefix += "    "
+
+            branch = "└─ " if is_last else "├─ "
+            result.append(prefix + branch + content)
+
+            if len(stack) <= level - 1:
+                stack.append(not is_last)
+            else:
+                stack[level - 1] = not is_last
+
+        cursor.insertText("\n".join(result))
