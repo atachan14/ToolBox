@@ -1,5 +1,75 @@
 [
   {
+    "clamp": "clamp(24px, calc(10.57px + 3.84vw), 40px)",
+    "min_px": "24",
+    "min_view": "350",
+    "max_view": "767",
+    "max_px": "40"
+  },
+  {
+    "clamp": "clamp(24px, calc(10.54px + 3.85vw), 40px)",
+    "min_px": "24",
+    "min_view": "350",
+    "max_view": "766",
+    "max_px": "40"
+  },
+  {
+    "clamp": "clamp(24px, calc(10.57px + 3.84vw), 40px)",
+    "min_px": "24",
+    "min_view": "350",
+    "max_view": "767",
+    "max_px": "40"
+  },
+  {
+    "clamp": "clamp(24px, calc(10.54px + 3.85vw), 40px)",
+    "min_px": "24",
+    "min_view": "350",
+    "max_view": "766",
+    "max_px": "40"
+  },
+  {
+    "clamp": "clamp(24px, calc(10.57px + 3.84vw), 40px)",
+    "min_px": "24",
+    "min_view": "350",
+    "max_view": "766",
+    "max_px": "40"
+  },
+  {
+    "clamp": "clamp(24px, calc(10.57px + 3.84vw), 40px)",
+    "min_px": "24",
+    "min_view": "350",
+    "max_view": "767",
+    "max_px": "40"
+  },
+  {
+    "clamp": "clamp(24px, calc(10.54px + 3.85vw), 40px)",
+    "min_px": "24",
+    "min_view": "350",
+    "max_view": "766",
+    "max_px": "40"
+  },
+  {
+    "clamp": "clamp(24px, calc(10.51px + 3.86vw), 40px)",
+    "min_px": "24",
+    "min_view": "350",
+    "max_view": "765",
+    "max_px": "40"
+  },
+  {
+    "clamp": "clamp(24px, calc(10.57px + 3.84vw), 40px)",
+    "min_px": "24",
+    "min_view": "350",
+    "max_view": "766",
+    "max_px": "40"
+  },
+  {
+    "clamp": "clamp(24px, calc(10.57px + 3.84vw), 40px)",
+    "min_px": "24",
+    "min_view": "350",
+    "max_view": "767",
+    "max_px": "40"
+  },
+  {
     "clamp": "clamp(16px, calc(-4.14px + 5.76vw), 40px)",
     "min_px": "16",
     "min_view": "350",

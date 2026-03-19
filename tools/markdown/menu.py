@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout
 )
 
-from core.flow_layout import FlowLayout   # ←あとで説明
+from core.flow_layout import FlowLayout  
 
 
 class MarkdownMenu(QFrame):
@@ -34,11 +34,9 @@ class MarkdownMenu(QFrame):
         g2_l.addWidget(self.export_btn)
 
         # --- group3 ---
-        self.preview_btn = QPushButton("preview")
 
         layout.addWidget(g1)
         layout.addWidget(g2)
-        layout.addWidget(self.preview_btn)
 
         layout.setContentsMargins(6,4,6,4)
 

@@ -12,8 +12,12 @@ test
 	***old and italic***
 	*イタリック*
 	[link](url)
-	
+	- 
 	- testdef insert_snippet(self, key):
-
-		
-		
+		- 
+		- 
+		> 
+		> 
+		1. 
+		1. 
+<!--text-->

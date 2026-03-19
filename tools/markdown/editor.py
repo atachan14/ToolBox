@@ -13,8 +13,6 @@ class MarkdownEditor(QPlainTextEdit):
     "[": "]",
     "{": "}",
     '"': '"',
-    "`": "`",
-    "*": "*",
     "_": "_",
 }
     SNIPPETS = {
@@ -379,7 +377,7 @@ class MarkdownEditor(QPlainTextEdit):
         if text.startswith("<!--") and text.endswith("-->"):
             text = text[4:-3]
         else:
-            text = "<!--" + text + "-->"
+            text = "<!-- " + text + " -->"
 
         cursor.insertText(text)
  
