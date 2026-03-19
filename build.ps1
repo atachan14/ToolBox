@@ -19,7 +19,8 @@ pyinstaller main.py `
 pyinstaller updater.py `
   --onefile `
   --name updater `
-  --clean
+  --clean `
+  --icon=toolbox.ico
 
 # ToolBoxに移動
 Move-Item dist\updater.exe dist\ToolBox\updater.exe -Force
