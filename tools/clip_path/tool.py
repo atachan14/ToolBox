@@ -15,9 +15,11 @@ class Tab(ToolBase):
         layout = QVBoxLayout(self)
 
         history_path = self.tool_data_dir / "history.json" if self.tool_data_dir else None
+        ui_state_path = self.tool_data_dir / "ui.json" if self.tool_data_dir else None
         self.window = ClipPathWindow(
             state_path=self.state_path,
             history_path=history_path,
+            ui_state_path=ui_state_path,
         )
         layout.addWidget(self.window)
 

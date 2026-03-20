@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QSize, QTimer, Qt
-from PySide6.QtGui import QColor, QFontMetrics, QIcon, QKeyEvent, QPainter, QPalette, QPen, QPixmap, QWheelEvent
+from PySide6.QtGui import QColor, QFontMetrics, QKeyEvent, QPainter, QPalette, QPen, QPixmap, QTextLayout, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -50,10 +50,69 @@ class CodeLineEdit(QLineEdit):
         self._wheel_handler(event)
 
 
+class HistoryPreviewWidget(QWidget):
+    def __init__(self, pixmap: QPixmap, size_text: str, code_text: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._pixmap = pixmap
+        self._size_text = size_text
+        self.base_code_text = code_text
+        self._display_lines = [code_text]
+        self._display_color = QColor(self.palette().color(QPalette.Text))
+        self._text_width = 120
+
+    def set_text_width(self, width: int):
+        self._text_width = width
+        self.update()
+
+    def set_preview_lines(self, lines: list[str]):
+        self._display_lines = lines or [""]
+        self._display_color = QColor(self.palette().color(QPalette.Text))
+        self.update()
+
+    def set_feedback_text(self, text: str):
+        self._display_lines = [text]
+        self._display_color = QColor("#4ecdc4")
+        self.update()
+
+    def line_count(self) -> int:
+        return max(1, len(self._display_lines) or 1)
+
+    def size_label_height(self) -> int:
+        return self.fontMetrics().height()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        metrics = painter.fontMetrics()
+
+        margin = 8
+        gap = 10
+        text_x = margin + self._pixmap.width() + gap
+        size_y = margin + metrics.ascent()
+
+        painter.drawPixmap(margin, margin, self._pixmap)
+
+        painter.setPen(QColor("#7f8797"))
+        painter.drawText(text_x, size_y, self._size_text)
+
+        painter.setPen(self._display_color)
+        line_y = margin + metrics.height() + 2 + metrics.ascent()
+        for line in self._display_lines:
+            painter.drawText(text_x, line_y, line)
+            line_y += metrics.lineSpacing()
+
+
 class ClipPathWindow(QMainWindow):
     MAX_HISTORY = 100
+    DEFAULT_HISTORY_DIALOG_WIDTH = 620
+    DEFAULT_HISTORY_DIALOG_HEIGHT = 360
 
-    def __init__(self, state_path: Path | None = None, history_path: Path | None = None):
+    def __init__(
+        self,
+        state_path: Path | None = None,
+        history_path: Path | None = None,
+        ui_state_path: Path | None = None,
+    ):
         super().__init__()
         self.points: list[ClipPoint] = []
         self.circles: list[CircleGuide] = []
@@ -66,19 +125,45 @@ class ClipPathWindow(QMainWindow):
         self.copy_feedback_base_text = ""
         self.state_path = Path(state_path) if state_path else None
         self.history_path = Path(history_path) if history_path else None
+        self.ui_state_path = Path(ui_state_path) if ui_state_path else None
         self._table_syncing = False
         self._toolbar_button_height = 24
         self._code_full_text = "clip-path: polygon();"
         self._code_scroll_offset = 0
+        self._history_dialog_width = self.DEFAULT_HISTORY_DIALOG_WIDTH
+        self._history_dialog_height = self.DEFAULT_HISTORY_DIALOG_HEIGHT
 
         self._build_ui()
         self._connect_ui()
+        self._restore_ui_state()
         self._restore_state()
         self._refresh_views()
 
     def set_state_path(self, state_path: Path | None):
         self.state_path = Path(state_path) if state_path else None
         self._save_state()
+
+    def _restore_ui_state(self):
+        if not self.ui_state_path or not self.ui_state_path.exists():
+            return
+        try:
+            state = json.loads(self.ui_state_path.read_text(encoding="utf-8") or "{}")
+        except json.JSONDecodeError:
+            return
+        if not isinstance(state, dict):
+            return
+        self._history_dialog_width = max(320, int(state.get("history_dialog_width", self.DEFAULT_HISTORY_DIALOG_WIDTH)))
+        self._history_dialog_height = max(240, int(state.get("history_dialog_height", self.DEFAULT_HISTORY_DIALOG_HEIGHT)))
+
+    def _save_ui_state(self):
+        if not self.ui_state_path:
+            return
+        self.ui_state_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "history_dialog_width": self._history_dialog_width,
+            "history_dialog_height": self._history_dialog_height,
+        }
+        self.ui_state_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _build_ui(self):
         self.setWindowTitle("Clip-Path")
@@ -321,7 +406,6 @@ class ClipPathWindow(QMainWindow):
             self.unit_percent.setChecked(True)
         self.grid_input.setValue(max(1, int(state.get("grid_value", 10))))
         self.grid_check.setChecked(bool(state.get("grid_enabled", True)))
-
         mode = state.get("mode", MODE_INPUT)
         if mode == MODE_VIEW:
             self.mode_screen.setChecked(True)
@@ -736,15 +820,17 @@ class ClipPathWindow(QMainWindow):
                 out.append(ClipPoint(x / max(w, 1.0), y / max(h, 1.0)))
         return out
 
-    def _make_shape_icon(self, code: str, size_info: dict | None = None) -> QPixmap:
-        pix = QPixmap(144, 96)
+    def _make_shape_icon(self, code: str, size_info: dict | None = None, side: int = 96) -> QPixmap:
+        pix = QPixmap(side, side)
         pix.fill(QColor("#1f2330"))
         p = QPainter(pix)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(QPen(QColor("#7aa2f7"), 2))
         points = self._parse_code_to_points(code, self._history_size_tuple(size_info)) or []
         if len(points) > 1:
-            mapped = [(18 + pt.x * 108, 12 + pt.y * 72) for pt in points]
+            margin = 12
+            draw_size = max(1, side - (margin * 2))
+            mapped = [(margin + pt.x * draw_size, margin + pt.y * draw_size) for pt in points]
             for i in range(len(mapped) - 1):
                 p.drawLine(int(mapped[i][0]), int(mapped[i][1]), int(mapped[i + 1][0]), int(mapped[i + 1][1]))
             if len(mapped) > 2:
@@ -752,34 +838,33 @@ class ClipPathWindow(QMainWindow):
         p.end()
         return pix
 
-    def _build_history_preview(self, text: str, width: int, max_lines: int, font_metrics: QFontMetrics) -> str:
+    def _build_history_preview_lines(self, text: str, width: int, max_lines: int, font_metrics: QFontMetrics) -> list[str]:
         if width <= 0 or max_lines <= 0:
-            return text
-        words = text.split(" ")
+            return [text]
+        layout = QTextLayout(text, self.font())
+        layout.beginLayout()
         lines: list[str] = []
-        current = ""
-        for word in words:
-            candidate = word if not current else f"{current} {word}"
-            if font_metrics.horizontalAdvance(candidate) <= width:
-                current = candidate
-                continue
-            if current:
-                lines.append(current)
-                if len(lines) == max_lines:
-                    return "\n".join(lines[:-1] + [font_metrics.elidedText(lines[-1], Qt.ElideRight, width)])
-                current = word
-            else:
-                lines.append(font_metrics.elidedText(word, Qt.ElideRight, width))
-                current = ""
-                if len(lines) == max_lines:
-                    return "\n".join(lines)
-        if current:
-            lines.append(current)
-        if len(lines) <= max_lines:
-            return "\n".join(lines)
-        kept = lines[: max_lines - 1]
-        kept.append(font_metrics.elidedText(lines[max_lines - 1], Qt.ElideRight, width))
-        return "\n".join(kept)
+        while len(lines) < max_lines:
+            line = layout.createLine()
+            if not line.isValid():
+                break
+            line.setLineWidth(width)
+            start = int(line.textStart())
+            length = int(line.textLength())
+            part = text[start : start + length]
+            has_more = start + length < len(text)
+            if len(lines) == max_lines - 1 and has_more:
+                part = part.rstrip()
+                while part and font_metrics.horizontalAdvance(f"{part}...") > width:
+                    part = part[:-1]
+                lines.append(f"{part}..." if part else "...")
+                break
+            lines.append(part)
+        layout.endLayout()
+        return lines or [""]
+
+    def _history_preview_height(self, font_metrics: QFontMetrics, line_count: int) -> int:
+        return max(1, line_count) * font_metrics.lineSpacing()
 
     def _show_history_dialog(self):
         items = self._load_history_entries()
@@ -793,36 +878,66 @@ class ClipPathWindow(QMainWindow):
         lst.setContextMenuPolicy(Qt.CustomContextMenu)
         lst.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         lst.verticalScrollBar().setSingleStep(12)
-        preview_size = QSize(144, 96)
+        preview_size = QSize(96, 96)
         lst.setIconSize(preview_size)
-        list_width = max(preview_size.width(), 288)
-        preview_text_width = list_width - 24
-        line_height = QFontMetrics(lst.font()).lineSpacing()
+        row_widgets: dict[int, HistoryPreviewWidget] = {}
         for entry in items:
             code = entry.get("code")
             if not isinstance(code, str):
                 continue
             size_info = entry.get("size")
-            size_suffix = ""
+            size_text = "[size: current]"
             if isinstance(size_info, dict):
                 w = size_info.get("w")
                 h = size_info.get("h")
                 unit = size_info.get("unit")
                 if isinstance(w, (int, float)) and isinstance(h, (int, float)) and isinstance(unit, str):
-                    size_suffix = f"  [size: {int(w) if float(w).is_integer() else w}x{int(h) if float(h).is_integer() else h}{unit}]"
-            preview_text = self._build_history_preview(f"{code}{size_suffix}", preview_text_width, 2, QFontMetrics(lst.font()))
-            item = QListWidgetItem(preview_text)
+                    size_text = f"[size: {int(w) if float(w).is_integer() else w}x{int(h) if float(h).is_integer() else h}{unit}]"
+            item = QListWidgetItem()
             item.setData(Qt.UserRole, entry)
-            item.setIcon(QIcon(self._make_shape_icon(code, size_info)))
-            item.setSizeHint(QSize(item.sizeHint().width(), preview_size.height() + (line_height * 2) + 14))
             lst.addItem(item)
+            widget = HistoryPreviewWidget(self._make_shape_icon(code, size_info, preview_size.width()), size_text, code)
+            row_widgets[id(item)] = widget
+            lst.setItemWidget(item, widget)
         layout.addWidget(lst)
+
+        def relayout_items():
+            metrics = QFontMetrics(lst.font())
+            code_width = max(120, lst.viewport().width() - preview_size.width() - 48)
+            for i in range(lst.count()):
+                item = lst.item(i)
+                widget = row_widgets.get(id(item))
+                if widget is None:
+                    continue
+                preview_lines = self._build_history_preview_lines(widget.base_code_text, code_width, 3, metrics)
+                widget.set_text_width(code_width)
+                widget.set_preview_lines(preview_lines)
+                code_height = self._history_preview_height(metrics, widget.line_count())
+                text_height = widget.size_label_height() + code_height + 8
+                item.setSizeHint(QSize(lst.viewport().width(), max(preview_size.height(), text_height) + 16))
+
+        def resize_event(event):
+            QDialog.resizeEvent(dlg, event)
+            relayout_items()
+
+        dlg.resizeEvent = resize_event
 
         def restore_selected(it: QListWidgetItem):
             payload = it.data(Qt.UserRole)
             code = payload.get("code") if isinstance(payload, dict) else None
             if not isinstance(code, str):
                 return
+            QApplication.clipboard().setText(code)
+            relayout_items()
+            clicked_widget = row_widgets.get(id(it))
+            if clicked_widget is not None:
+                clicked_widget.set_feedback_text("copy and send")
+
+                def _restore_feedback(widget: HistoryPreviewWidget = clicked_widget):
+                    if widget in row_widgets.values():
+                        relayout_items()
+
+                QTimer.singleShot(900, _restore_feedback)
             parsed = self._parse_code_to_points(
                 code,
                 self._history_size_tuple(payload.get("size") if isinstance(payload, dict) else None),
@@ -860,7 +975,9 @@ class ClipPathWindow(QMainWindow):
                 return
             scroll_value = lst.verticalScrollBar().value()
             row = lst.row(item)
+            item_key = id(item)
             removed = lst.takeItem(row)
+            row_widgets.pop(item_key, None)
             del removed
             lst.verticalScrollBar().setValue(scroll_value)
             remaining: list[dict] = []
@@ -873,7 +990,15 @@ class ClipPathWindow(QMainWindow):
 
         lst.itemClicked.connect(restore_selected)
         lst.customContextMenuRequested.connect(on_context_menu)
-        dlg.resize(620, 360)
+        dlg.resize(self._history_dialog_width, self._history_dialog_height)
+
+        def persist_history_dialog_size(_result: int):
+            self._history_dialog_width = max(320, dlg.width())
+            self._history_dialog_height = max(240, dlg.height())
+            self._save_ui_state()
+
+        dlg.finished.connect(persist_history_dialog_size)
+        QTimer.singleShot(0, relayout_items)
         dlg.exec()
 
     def keyPressEvent(self, event: QKeyEvent):
