@@ -7,7 +7,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
-from .state import MODE_INPUT, MODE_VIEW, ClipPoint
+from .state import MODE_CIRCLE, MODE_INPUT, MODE_VIEW, CircleGuide, ClipPoint
 
 
 @dataclass
@@ -16,9 +16,13 @@ class CanvasConfig:
     points_getter: Callable[[], list[ClipPoint]]
     size_getter: Callable[[], tuple[float, float, str]]
     grid_getter: Callable[[], tuple[bool, int]]
+    circles_getter: Callable[[], list[CircleGuide]]
+    snap_points_getter: Callable[[], list[ClipPoint]]
     on_points_changed: Callable[[], None]
     on_cursor_changed: Callable[[ClipPoint, ClipPoint], None]
     on_push_history: Callable[[], None]
+    on_circle_created: Callable[[ClipPoint, ClipPoint], None]
+    on_circle_removed: Callable[[int], None]
 
 
 class ClipPathCanvas(QWidget):
@@ -31,6 +35,7 @@ class ClipPathCanvas(QWidget):
         self.dragging_index: int | None = None
         self.pending_insert_index: int | None = None
         self.panning = False
+        self.circle_drag_start: ClipPoint | None = None
         self.last_mouse_scene = QPointF(0, 0)
         self.last_mouse_screen = QPointF(0, 0)
 
@@ -110,16 +115,50 @@ class ClipPathCanvas(QWidget):
 
     def _snap_normalized(self, point: ClipPoint) -> ClipPoint:
         active, grid_value = self.config.grid_getter()
+        snapped = point
 
-        if not active:
+        if active:
+            step_x, step_y = self._grid_steps_normalized(max(1, grid_value))
+            snapped = ClipPoint(
+                round(point.x / step_x) * step_x,
+                round(point.y / step_y) * step_y,
+            )
+
+        return self._snap_to_snap_points(snapped)
+
+    def _snap_to_snap_points(self, point: ClipPoint) -> ClipPoint:
+        snap_points = self.config.snap_points_getter()
+        if not snap_points:
             return point
 
-        step_x, step_y = self._grid_steps_normalized(max(1, grid_value))
+        guide = self._guide_rect_scene()
+        threshold_nx = 12.0 / max(guide.width(), 1.0)
+        threshold_ny = 12.0 / max(guide.height(), 1.0)
+        threshold = max(threshold_nx, threshold_ny)
 
-        return ClipPoint(
-            round(point.x / step_x) * step_x,
-            round(point.y / step_y) * step_y,
-        )
+        best = point
+        best_dist = float("inf")
+
+        for snap in snap_points:
+            dx = snap.x - point.x
+            dy = snap.y - point.y
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist < best_dist:
+                best_dist = dist
+                best = snap
+
+        return best if best_dist <= threshold else point
+
+    def _grid_steps_normalized(self, grid_value: int) -> tuple[float, float]:
+        size_w, size_h, unit = self.config.size_getter()
+
+        if unit == "px":
+            step_x = grid_value / max(size_w, 1.0)
+            step_y = grid_value / max(size_h, 1.0)
+            return max(step_x, 1e-6), max(step_y, 1e-6)
+
+        step = grid_value / 100.0
+        return max(step, 1e-6), max(step, 1e-6)
 
     def _grid_steps_normalized(self, grid_value: int) -> tuple[float, float]:
         size_w, size_h, unit = self.config.size_getter()
@@ -171,6 +210,8 @@ class ClipPathCanvas(QWidget):
             return
 
         if mode != MODE_INPUT:
+            if mode == MODE_CIRCLE:
+                self._handle_circle_press(event, scene_pos)
             return
 
         if event.button() == Qt.LeftButton:
@@ -228,6 +269,10 @@ class ClipPathCanvas(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
+            if self.current_mode() == MODE_CIRCLE and self.circle_drag_start is not None:
+                end = self._snap_normalized(self._scene_to_normalized(self._screen_to_scene(event.position())))
+                self.config.on_circle_created(self.circle_drag_start, end)
+                self.circle_drag_start = None
             self.dragging_index = None
             self.pending_insert_index = None
             self.panning = False
@@ -305,6 +350,7 @@ class ClipPathCanvas(QWidget):
                 )
 
         points = self.config.points_getter()
+        circles = self.config.circles_getter()
 
         painter.setPen(QPen(QColor("#7aa2f7"), 2))
 
@@ -323,6 +369,38 @@ class ClipPathCanvas(QWidget):
             screen = self._scene_to_screen(self._normalized_to_scene(point))
             painter.drawEllipse(screen, 4, 4)
 
+        painter.setPen(QPen(QColor("#9ece6a"), 1))
+        for circle in circles:
+            center = self._scene_to_screen(self._normalized_to_scene(circle.center))
+            guide = self._guide_rect_scene()
+            rx = circle.radius * guide.width() * self.zoom
+            ry = circle.radius * guide.height() * self.zoom
+            painter.drawEllipse(center, rx, ry)
+            for snap in circle.snap_points:
+                snap_screen = self._scene_to_screen(self._normalized_to_scene(snap))
+                painter.drawEllipse(snap_screen, 3, 3)
+
         mode_color = "#9ece6a" if self.current_mode() == MODE_INPUT else "#e0af68"
         painter.setPen(QPen(QColor(mode_color), 1))
         painter.drawText(10, 20, f"Mode: {self.current_mode()}  Zoom: {self.zoom:.2f}")
+
+    def _handle_circle_press(self, event: QMouseEvent, scene_pos: QPointF):
+        if event.button() == Qt.LeftButton:
+            self.circle_drag_start = self._snap_normalized(self._scene_to_normalized(scene_pos))
+            return
+
+        if event.button() != Qt.RightButton:
+            return
+
+        point = self._scene_to_normalized(scene_pos)
+        circles = self.config.circles_getter()
+        for idx, circle in enumerate(circles):
+            dx = point.x - circle.center.x
+            dy = point.y - circle.center.y
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist <= circle.radius * 1.15:
+                self.config.on_push_history()
+                self.config.on_circle_removed(idx)
+                self.config.on_points_changed()
+                self.update()
+                return
