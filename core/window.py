@@ -1,23 +1,39 @@
 from PySide6.QtWidgets import (
-    QMainWindow,
-    QTabWidget,
-    QWidget,
-    QTabBar,
+    QApplication,
+    QHBoxLayout,
     QInputDialog,
-    QMessageBox,
+    QLabel,
+    QMainWindow,
     QMenu,
+    QMessageBox,
+    QSizePolicy,
+    QStackedWidget,
+    QToolButton,
     QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtGui import QShortcut, QKeySequence
-from PySide6.QtCore import QSettings
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPalette, QPen, QShortcut
+from PySide6.QtCore import QEvent, QSettings, Qt, QTimer, Signal
 import win32gui
 import win32con
+from core.flow_layout import FlowLayout
 from core.plus_tab import PlusTab
 from core.tool_loader import load_tools
 from core.paths import TABS_DIR
 from core.tab_storage import create_tab_folder
 import json
 import shutil
+
+
+def _mix_colors(base, overlay, ratio):
+    ratio = max(0.0, min(1.0, ratio))
+    inv = 1.0 - ratio
+    return QColor(
+        round(base.red() * inv + overlay.red() * ratio),
+        round(base.green() * inv + overlay.green() * ratio),
+        round(base.blue() * inv + overlay.blue() * ratio),
+        round(base.alpha() * inv + overlay.alpha() * ratio),
+    )
 
 class MainWindow(QMainWindow):
     
@@ -36,8 +52,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Toolbox")
 
-        self.tabs = QTabWidget()
-        self.tabs.setTabBar(FixedTabBar())
+        self.tabs = WrappedTabWidget()
         self.tabs.tabBar().setMovable(True)
         self.tabs.setTabsClosable(True)
         
@@ -70,12 +85,7 @@ class MainWindow(QMainWindow):
         plus_tab = PlusTab(self)
 
         index = self.tabs.addTab(plus_tab, "+")
-
-        self.tabs.tabBar().setTabButton(
-            index,
-            QTabBar.ButtonPosition.RightSide,
-            None
-        )
+        self.tabs.tabBar().setTabClosable(index, False)
 
     def close_tab(self, index):
 
@@ -262,47 +272,472 @@ class MainWindow(QMainWindow):
         else:
             self.wrapper.setStyleSheet("")
                 
-class FixedTabBar(QTabBar):
-    
+class WrappedTabButton(QWidget):
+
+    clicked = Signal()
+    close_requested = Signal()
+    hovered = Signal(bool)
+    drag_requested = Signal(object)
+    context_requested = Signal(object)
+
+    def __init__(self, text):
+        super().__init__()
+        self._current = False
+        self._hovered = False
+        self._drag_start = None
+        self.setObjectName("wrapped_tab_button")
+
+        self.setAttribute(Qt.WA_Hover, True)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setMouseTracking(True)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.setCursor(Qt.PointingHandCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 4, 8, 4)
+        layout.setSpacing(6)
+
+        self.label = QLabel(text)
+        layout.addWidget(self.label)
+
+        self.close_button = QToolButton()
+        self.close_button.setObjectName("wrapped_tab_close")
+        self.close_button.setText("x")
+        self.close_button.setAutoRaise(True)
+        self.close_button.setCursor(Qt.ArrowCursor)
+        self.close_button.setFixedSize(14, 14)
+        self.close_button.clicked.connect(self.close_requested.emit)
+        layout.addWidget(self.close_button)
+
+        self.set_current(False)
+
+    def text(self):
+        return self.label.text()
+
+    def set_text(self, text):
+        self.label.setText(text)
+        self.updateGeometry()
+
+    def set_current(self, current):
+        self._current = current
+        self._refresh_style()
+
+    def set_closable(self, closable):
+        self.close_button.setVisible(closable)
+        right_margin = 8 if closable else 10
+        self.layout().setContentsMargins(10, 4, right_margin, 4)
+        self.updateGeometry()
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self.hovered.emit(True)
+        self._refresh_style()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.hovered.emit(False)
+        self._refresh_style()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_start = event.position().toPoint()
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_start is None:
+            return super().mouseMoveEvent(event)
+
+        if not (event.buttons() & Qt.LeftButton):
+            return super().mouseMoveEvent(event)
+
+        distance = (event.position().toPoint() - self._drag_start).manhattanLength()
+        if distance >= QApplication.startDragDistance():
+            self.drag_requested.emit(event.globalPosition().toPoint())
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_start = None
+        super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event):
+        self.context_requested.emit(event.globalPos())
+        event.accept()
+
+    def _refresh_style(self):
+        app = QApplication.instance()
+        palette = app.palette() if app is not None else self.style().standardPalette()
+        panel = palette.color(QPalette.ColorRole.Window)
+        background = palette.color(QPalette.ColorRole.Button)
+        border = palette.color(QPalette.ColorRole.Mid)
+        accent = palette.color(QPalette.ColorRole.Highlight)
+        text = palette.color(QPalette.ColorRole.ButtonText)
+        close_text = palette.color(QPalette.ColorRole.Text)
+        outer_border = _mix_colors(background, border, 0.65)
+        inner_border = _mix_colors(panel, border, 0.18)
+        hover_fill = _mix_colors(background, accent, 0.14)
+        selected_fill = _mix_colors(panel, accent, 0.22)
+        hover_border = _mix_colors(outer_border, accent, 0.32)
+        selected_border = _mix_colors(outer_border, accent, 0.48)
+        inactive_top = _mix_colors(background, border, 0.22)
+        hover_top = _mix_colors(accent, panel, 0.28)
+
+        fill = selected_fill if self._current else hover_fill if self._hovered else background
+        edge = selected_border if self._current else hover_border if self._hovered else outer_border
+        top_line = accent if self._current else hover_top if self._hovered else inactive_top
+        close_hover = _mix_colors(panel, accent, 0.18).name()
+
+        self.setStyleSheet(
+            f"""
+            QWidget#wrapped_tab_button {{
+                background: {fill.name()};
+                color: {text.name()};
+                border-left: 1px solid {edge.name()};
+                border-right: 1px solid {edge.name()};
+                border-bottom: 1px solid {edge.name()};
+                border-top: 3px solid {top_line.name()};
+                border-top-left-radius: 0px;
+                border-top-right-radius: 0px;
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+                color: {text.name()};
+            }}
+            QWidget#wrapped_tab_button QLabel {{
+                border-top: none;
+                border-left: none;
+                border-right: none;
+                border-bottom: none;
+            }}
+            QToolButton#wrapped_tab_close {{
+                background: transparent;
+                border: 1px solid transparent;
+                color: {close_text.name()};
+                padding: 0;
+                border-radius: 2px;
+            }}
+            QToolButton#wrapped_tab_close:hover {{
+                background: {close_hover};
+                color: {text.name()};
+                border-color: {inner_border.name()};
+            }}
+            """
+        )
+
+
+class FixedTabBar(QWidget):
+
+    currentChanged = Signal(int)
+    tabCloseRequested = Signal(int)
+    tabMoveRequested = Signal(int, int)
+
     def __init__(self):
         super().__init__()
         self.hovered_index = -1
-        self.setMouseTracking(True)
+        self._buttons = []
+        self._current_index = -1
+        self._tabs_closable = False
+        self._movable = False
+        self.setObjectName("wrapped_tab_bar")
+        self._refresh_pending = False
 
-    def mouseMoveEvent(self, event):
-        self.hovered_index = self.tabAt(event.pos())
-        super().mouseMoveEvent(event)
-        
-    def mousePressEvent(self, event):
+        self._layout = FlowLayout(self, margin=0, spacing=1)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.setContextMenuPolicy(Qt.DefaultContextMenu)
 
-        index = self.tabAt(event.pos())
+    def hasHeightForWidth(self):
+        return self.layout().hasHeightForWidth()
 
-        if index >= 0 and self.tabText(index) == "+":
-            QTabBar.mousePressEvent(self, event)
+    def heightForWidth(self, width):
+        return self.layout().heightForWidth(width)
+
+    def minimumSizeHint(self):
+        return self.layout().minimumSize()
+
+    def sizeHint(self):
+        hint = self.layout().sizeHint()
+        width = max(hint.width(), 160)
+        height = self.heightForWidth(max(self.width(), width))
+        hint.setHeight(max(height, 28))
+        hint.setWidth(width)
+        return hint
+
+    def changeEvent(self, event):
+        if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
+            self._schedule_style_refresh()
+        super().changeEvent(event)
+
+    def _schedule_style_refresh(self):
+        if self._refresh_pending:
+            return
+        self._refresh_pending = True
+        QTimer.singleShot(0, self._apply_scheduled_refresh)
+
+    def _apply_scheduled_refresh(self):
+        self._refresh_pending = False
+        for button in self._buttons:
+            button._refresh_style()
+        self.update()
+
+    def paintEvent(self, event):
+        app = QApplication.instance()
+        palette = app.palette() if app is not None else self.style().standardPalette()
+        panel = palette.color(QPalette.ColorRole.Window)
+        border = palette.color(QPalette.ColorRole.Mid)
+        groove = _mix_colors(panel, border, 0.2)
+
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), panel)
+        painter.setPen(QPen(groove))
+        painter.drawLine(self.rect().bottomLeft(), self.rect().bottomRight())
+        super().paintEvent(event)
+
+    def setMovable(self, movable):
+        self._movable = movable
+
+    def addTab(self, text):
+        return self.insertTab(len(self._buttons), text)
+
+    def insertTab(self, index, text):
+        button = WrappedTabButton(text)
+        button.clicked.connect(lambda b=button: self._on_tab_clicked(b))
+        button.close_requested.connect(lambda b=button: self._on_close_requested(b))
+        button.hovered.connect(lambda entered, b=button: self._on_hovered(b, entered))
+        button.drag_requested.connect(lambda point, b=button: self._on_drag_requested(b, point))
+        button.context_requested.connect(lambda point, b=button: self._show_context_menu(b, point))
+
+        index = max(0, min(index, len(self._buttons)))
+        self._buttons.insert(index, button)
+        self._rebuild_layout()
+        self._apply_closable_state(index)
+        if self._current_index < 0:
+            self.setCurrentIndex(0)
+        elif index <= self._current_index:
+            self._current_index += 1
+            self._sync_selection()
+        return index
+
+    def removeTab(self, index):
+        if not (0 <= index < len(self._buttons)):
             return
 
-        super().mousePressEvent(event)
-        
-    def contextMenuEvent(self, event):
+        button = self._buttons.pop(index)
+        self._layout.removeWidget(button)
+        button.deleteLater()
 
-        index = self.tabAt(event.pos())
+        if not self._buttons:
+            self._current_index = -1
+        elif index == self._current_index:
+            self._current_index = min(index, len(self._buttons) - 1)
+        elif index < self._current_index:
+            self._current_index -= 1
 
-        if index < 0:
+        if self.hovered_index == index:
+            self.hovered_index = -1
+        elif index < self.hovered_index:
+            self.hovered_index -= 1
+
+        self._sync_selection()
+        self.updateGeometry()
+
+    def moveTab(self, from_index, to_index):
+        if not (0 <= from_index < len(self._buttons) and 0 <= to_index < len(self._buttons)):
             return
+        if from_index == to_index:
+            return
+
+        button = self._buttons.pop(from_index)
+        self._buttons.insert(to_index, button)
+
+        if self._current_index == from_index:
+            self._current_index = to_index
+        elif from_index < self._current_index <= to_index:
+            self._current_index -= 1
+        elif to_index <= self._current_index < from_index:
+            self._current_index += 1
+
+        self._rebuild_layout()
+        self._sync_selection()
+
+    def count(self):
+        return len(self._buttons)
+
+    def tabText(self, index):
+        return self._buttons[index].text()
+
+    def setTabText(self, index, text):
+        self._buttons[index].set_text(text)
+        self.updateGeometry()
+
+    def setTabClosable(self, index, closable):
+        self._buttons[index].set_closable(closable)
+        self.updateGeometry()
+
+    def setTabsClosable(self, closable):
+        self._tabs_closable = closable
+        for index in range(len(self._buttons)):
+            self._apply_closable_state(index)
+        self.updateGeometry()
+
+    def currentIndex(self):
+        return self._current_index
+
+    def setCurrentIndex(self, index):
+        if not (0 <= index < len(self._buttons)):
+            return
+        if index == self._current_index:
+            self._sync_selection()
+            return
+        self._current_index = index
+        self._sync_selection()
+        self.currentChanged.emit(index)
+
+    def tabAt(self, pos):
+        for index, button in enumerate(self._buttons):
+            if button.geometry().contains(pos):
+                return index
+        return -1
+
+    def _sync_selection(self):
+        for index, button in enumerate(self._buttons):
+            button.set_current(index == self._current_index)
+        self.updateGeometry()
+
+    def _rebuild_layout(self):
+        while self._layout.count():
+            self._layout.takeAt(0)
+        for button in self._buttons:
+            self._layout.addWidget(button)
+        self.updateGeometry()
+
+    def _apply_closable_state(self, index):
+        closable = self._tabs_closable and self._buttons[index].text() != "+"
+        self._buttons[index].set_closable(closable)
+
+    def _on_tab_clicked(self, button):
+        index = self._buttons.index(button)
+        self.setCurrentIndex(index)
+
+    def _on_close_requested(self, button):
+        index = self._buttons.index(button)
+        self.tabCloseRequested.emit(index)
+
+    def _on_hovered(self, button, entered):
+        if entered:
+            self.hovered_index = self._buttons.index(button)
+        elif self.hovered_index == self._buttons.index(button):
+            self.hovered_index = -1
+
+    def _on_drag_requested(self, button, global_pos):
+        if not self._movable:
+            return
+
+        from_index = self._buttons.index(button)
+        if self.tabText(from_index) == "+":
+            return
+
+        local_pos = self.mapFromGlobal(global_pos)
+        to_index = self.tabAt(local_pos)
+        if to_index < 0 or to_index == from_index or self.tabText(to_index) == "+":
+            return
+
+        self.tabMoveRequested.emit(from_index, to_index)
+
+    def _show_context_menu(self, button, global_pos):
+        index = self._buttons.index(button)
 
         if self.tabText(index) == "+":
             return
 
         menu = QMenu(self)
-
         rename = menu.addAction("Rename")
         close = menu.addAction("Close")
-
-        action = menu.exec(event.globalPos())
+        action = menu.exec(global_pos)
 
         if action == rename:
             self.window().rename_tab(index)
-
         if action == close:
             self.window().close_tab(index)
-            
+
+
+class WrappedTabWidget(QWidget):
+
+    tabCloseRequested = Signal(int)
+
+    def __init__(self):
+        super().__init__()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._tab_bar = FixedTabBar()
+        self._stack = QStackedWidget()
+
+        layout.addWidget(self._tab_bar)
+        layout.addWidget(self._stack, 1)
+
+        self._tab_bar.currentChanged.connect(self._stack.setCurrentIndex)
+        self._tab_bar.tabCloseRequested.connect(self.tabCloseRequested.emit)
+        self._tab_bar.tabMoveRequested.connect(self._move_tab)
+
+    def tabBar(self):
+        return self._tab_bar
+
+    def setTabsClosable(self, closable):
+        self._tab_bar.setTabsClosable(closable)
+
+    def addTab(self, widget, label):
+        index = self._stack.addWidget(widget)
+        self._tab_bar.addTab(label)
+        return index
+
+    def insertTab(self, index, widget, label):
+        index = self._stack.insertWidget(index, widget)
+        self._tab_bar.insertTab(index, label)
+        return index
+
+    def removeTab(self, index):
+        widget = self._stack.widget(index)
+        self._stack.removeWidget(widget)
+        self._tab_bar.removeTab(index)
+        if widget is not None:
+            widget.setParent(None)
+
+    def count(self):
+        return self._stack.count()
+
+    def tabText(self, index):
+        return self._tab_bar.tabText(index)
+
+    def setTabText(self, index, text):
+        self._tab_bar.setTabText(index, text)
+
+    def indexOf(self, widget):
+        return self._stack.indexOf(widget)
+
+    def setCurrentIndex(self, index):
+        self._tab_bar.setCurrentIndex(index)
+        self._stack.setCurrentIndex(index)
+
+    def currentIndex(self):
+        return self._stack.currentIndex()
+
+    def _move_tab(self, from_index, to_index):
+        widget = self._stack.widget(from_index)
+        current_index = self._stack.currentIndex()
+
+        self._stack.removeWidget(widget)
+        self._stack.insertWidget(to_index, widget)
+        self._tab_bar.moveTab(from_index, to_index)
+
+        if current_index == from_index:
+            self.setCurrentIndex(to_index)
+        elif from_index < current_index <= to_index:
+            self.setCurrentIndex(current_index - 1)
+        elif to_index <= current_index < from_index:
+            self.setCurrentIndex(current_index + 1)
