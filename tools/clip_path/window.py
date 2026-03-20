@@ -4,8 +4,8 @@ import json
 import math
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSize, QTimer, Qt
-from PySide6.QtGui import QColor, QIcon, QKeyEvent, QPainter, QPalette, QPen, QPixmap, QWheelEvent
+from PySide6.QtCore import QSize, QTimer, Qt
+from PySide6.QtGui import QColor, QFontMetrics, QIcon, QKeyEvent, QPainter, QPalette, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -204,6 +204,12 @@ class ClipPathWindow(QMainWindow):
 
         footer = QHBoxLayout()
         self.cursor_label = QLabel("Cursor: x=0.00%, y=0.00%")
+        cursor_metrics = QFontMetrics(self.cursor_label.font())
+        cursor_width = max(
+            cursor_metrics.horizontalAdvance("Cursor: x=100.00%, y=100.00%"),
+            cursor_metrics.horizontalAdvance("Cursor: x=9999.0px, y=9999.0px"),
+        )
+        self.cursor_label.setFixedWidth(cursor_width + 8)
         footer.addWidget(self.cursor_label)
 
         self.code_area = QScrollArea()
@@ -393,19 +399,40 @@ class ClipPathWindow(QMainWindow):
         points, circles = self.redo_stack.pop()
         self._apply_state(points, circles)
 
+    def _load_history_entries(self) -> list[dict]:
+        if not self.history_path.exists():
+            return []
+        try:
+            loaded = json.loads(self.history_path.read_text(encoding="utf-8") or "[]")
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(loaded, list):
+            return []
+        entries: list[dict] = []
+        for item in loaded:
+            if isinstance(item, str):
+                entries.append({"code": item})
+                continue
+            if isinstance(item, dict) and isinstance(item.get("code"), str):
+                normalized = {"code": item["code"]}
+                size = item.get("size")
+                if isinstance(size, dict):
+                    normalized["size"] = {
+                        "w": size.get("w"),
+                        "h": size.get("h"),
+                        "unit": size.get("unit"),
+                    }
+                entries.append(normalized)
+        return entries
+
     def _save_history_entry(self, code: str):
         self.history_path.parent.mkdir(parents=True, exist_ok=True)
-        entries: list[str] = []
-        if self.history_path.exists():
-            try:
-                loaded = json.loads(self.history_path.read_text(encoding="utf-8") or "[]")
-                if isinstance(loaded, list):
-                    entries = [str(v) for v in loaded if isinstance(v, str)]
-            except json.JSONDecodeError:
-                entries = []
-        if entries and entries[0] == code:
+        w, h, unit = self._get_size()
+        entry = {"code": code, "size": {"w": w, "h": h, "unit": unit}}
+        entries = self._load_history_entries()
+        if entries and entries[0].get("code") == code and entries[0].get("size") == entry["size"]:
             return
-        entries.insert(0, code)
+        entries.insert(0, entry)
         self.history_path.write_text(json.dumps(entries[: self.MAX_HISTORY], ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _on_code_clicked(self, _event):
@@ -535,49 +562,93 @@ class ClipPathWindow(QMainWindow):
         p.end()
         return pix
 
-    def _history_preview_text(self, code: str, max_chars: int = 220) -> str:
-        text = code.replace(", ", ",\n")
-        if len(text) <= max_chars:
+    def _build_history_preview(self, text: str, width: int, max_lines: int, font_metrics: QFontMetrics) -> str:
+        if width <= 0 or max_lines <= 0:
             return text
-        return text[: max_chars - 1] + "…"
+        words = text.split(" ")
+        lines: list[str] = []
+        current = ""
+        for word in words:
+            candidate = word if not current else f"{current} {word}"
+            if font_metrics.horizontalAdvance(candidate) <= width:
+                current = candidate
+                continue
+            if current:
+                lines.append(current)
+                if len(lines) == max_lines:
+                    return "\n".join(lines[:-1] + [font_metrics.elidedText(lines[-1], Qt.ElideRight, width)])
+                current = word
+            else:
+                lines.append(font_metrics.elidedText(word, Qt.ElideRight, width))
+                current = ""
+                if len(lines) == max_lines:
+                    return "\n".join(lines)
+        if current:
+            lines.append(current)
+        if len(lines) <= max_lines:
+            return "\n".join(lines)
+        kept = lines[: max_lines - 1]
+        kept.append(font_metrics.elidedText(lines[max_lines - 1], Qt.ElideRight, width))
+        return "\n".join(kept)
 
     def _show_history_dialog(self):
-        if not self.history_path.exists():
+        items = self._load_history_entries()
+        if not items:
             QMessageBox.information(self, "履歴", "履歴がありません")
             return
-        try:
-            items = json.loads(self.history_path.read_text(encoding="utf-8") or "[]")
-        except json.JSONDecodeError:
-            items = []
         dlg = QDialog(self)
         dlg.setWindowTitle("Clip-Path History")
         layout = QVBoxLayout(dlg)
         lst = QListWidget()
         preview_size = QSize(144, 96)
         lst.setIconSize(preview_size)
-        lst.setWordWrap(True)
-        lst.setTextElideMode(Qt.ElideRight)
-        lst.setContextMenuPolicy(Qt.CustomContextMenu)
-        for code in items:
+        list_width = max(preview_size.width(), 288)
+        preview_text_width = list_width - 24
+        line_height = QFontMetrics(lst.font()).lineSpacing()
+        for entry in items:
+            code = entry.get("code")
             if not isinstance(code, str):
                 continue
-            item = QListWidgetItem(self._history_preview_text(code))
+            size_info = entry.get("size")
+            size_suffix = ""
+            if isinstance(size_info, dict):
+                w = size_info.get("w")
+                h = size_info.get("h")
+                unit = size_info.get("unit")
+                if isinstance(w, (int, float)) and isinstance(h, (int, float)) and isinstance(unit, str):
+                    size_suffix = f"  [size: {int(w) if float(w).is_integer() else w}x{int(h) if float(h).is_integer() else h}{unit}]"
+            preview_text = self._build_history_preview(f"{code}{size_suffix}", preview_text_width, 2, QFontMetrics(lst.font()))
+            item = QListWidgetItem(preview_text)
+            item.setData(Qt.UserRole, entry)
             item.setIcon(QIcon(self._make_shape_icon(code)))
-            item.setData(Qt.UserRole, code)
-            item.setSizeHint(QSize(item.sizeHint().width(), preview_size.height() + 16))
+            item.setSizeHint(QSize(item.sizeHint().width(), preview_size.height() + (line_height * 2) + 14))
             lst.addItem(item)
         layout.addWidget(lst)
 
         def restore_selected(it: QListWidgetItem):
-            raw_code = it.data(Qt.UserRole)
-            if not isinstance(raw_code, str):
+            payload = it.data(Qt.UserRole)
+            code = payload.get("code") if isinstance(payload, dict) else None
+            if not isinstance(code, str):
                 return
-            parsed = self._parse_code_to_points(raw_code)
+            parsed = self._parse_code_to_points(code)
             if parsed is None:
                 return
             self._push_undo_state()
             self.points = parsed
             self.circles = []
+            if isinstance(payload, dict):
+                size_info = payload.get("size")
+                if isinstance(size_info, dict):
+                    w = size_info.get("w")
+                    h = size_info.get("h")
+                    unit = size_info.get("unit")
+                    if isinstance(w, (int, float)) and isinstance(h, (int, float)):
+                        self.size_w.setValue(max(1, int(round(w))))
+                        self.size_h.setValue(max(1, int(round(h))))
+                    if unit == SIZE_TYPE_PERCENT:
+                        self.unit_percent.setChecked(True)
+                    elif unit == "px":
+                        self.unit_px.setChecked(True)
             self._refresh_views()
             self.canvas.update()
 
