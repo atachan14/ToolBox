@@ -4,7 +4,7 @@ import json
 import math
 from pathlib import Path
 
-from PySide6.QtCore import QSize, QTimer, Qt
+from PySide6.QtCore import QPoint, QSize, QTimer, Qt
 from PySide6.QtGui import QColor, QIcon, QKeyEvent, QPainter, QPalette, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -519,20 +520,26 @@ class ClipPathWindow(QMainWindow):
         return out
 
     def _make_shape_icon(self, code: str) -> QPixmap:
-        pix = QPixmap(288, 192)
+        pix = QPixmap(144, 96)
         pix.fill(QColor("#1f2330"))
         p = QPainter(pix)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(QPen(QColor("#7aa2f7"), 2))
         points = self._parse_code_to_points(code) or []
         if len(points) > 1:
-            mapped = [(36 + pt.x * 216, 24 + pt.y * 144) for pt in points]
+            mapped = [(18 + pt.x * 108, 12 + pt.y * 72) for pt in points]
             for i in range(len(mapped) - 1):
                 p.drawLine(int(mapped[i][0]), int(mapped[i][1]), int(mapped[i + 1][0]), int(mapped[i + 1][1]))
             if len(mapped) > 2:
                 p.drawLine(int(mapped[-1][0]), int(mapped[-1][1]), int(mapped[0][0]), int(mapped[0][1]))
         p.end()
         return pix
+
+    def _history_preview_text(self, code: str, max_chars: int = 220) -> str:
+        text = code.replace(", ", ",\n")
+        if len(text) <= max_chars:
+            return text
+        return text[: max_chars - 1] + "…"
 
     def _show_history_dialog(self):
         if not self.history_path.exists():
@@ -546,19 +553,26 @@ class ClipPathWindow(QMainWindow):
         dlg.setWindowTitle("Clip-Path History")
         layout = QVBoxLayout(dlg)
         lst = QListWidget()
-        preview_size = QSize(288, 192)
+        preview_size = QSize(144, 96)
         lst.setIconSize(preview_size)
+        lst.setWordWrap(True)
+        lst.setTextElideMode(Qt.ElideRight)
+        lst.setContextMenuPolicy(Qt.CustomContextMenu)
         for code in items:
             if not isinstance(code, str):
                 continue
-            item = QListWidgetItem(code)
+            item = QListWidgetItem(self._history_preview_text(code))
             item.setIcon(QIcon(self._make_shape_icon(code)))
+            item.setData(Qt.UserRole, code)
             item.setSizeHint(QSize(item.sizeHint().width(), preview_size.height() + 16))
             lst.addItem(item)
         layout.addWidget(lst)
 
         def restore_selected(it: QListWidgetItem):
-            parsed = self._parse_code_to_points(it.text())
+            raw_code = it.data(Qt.UserRole)
+            if not isinstance(raw_code, str):
+                return
+            parsed = self._parse_code_to_points(raw_code)
             if parsed is None:
                 return
             self._push_undo_state()
@@ -566,9 +580,29 @@ class ClipPathWindow(QMainWindow):
             self.circles = []
             self._refresh_views()
             self.canvas.update()
-            dlg.accept()
+
+        def on_context_menu(pos: QPoint):
+            item = lst.itemAt(pos)
+            if item is None:
+                return
+            menu = QMenu(lst)
+            delete_action = menu.addAction("履歴から削除")
+            action = menu.exec(lst.viewport().mapToGlobal(pos))
+            if action != delete_action:
+                return
+            row = lst.row(item)
+            removed = lst.takeItem(row)
+            del removed
+            remaining: list[str] = []
+            for i in range(lst.count()):
+                code = lst.item(i).data(Qt.UserRole)
+                if isinstance(code, str):
+                    remaining.append(code)
+            self.history_path.parent.mkdir(parents=True, exist_ok=True)
+            self.history_path.write_text(json.dumps(remaining, ensure_ascii=False, indent=2), encoding="utf-8")
 
         lst.itemClicked.connect(restore_selected)
+        lst.customContextMenuRequested.connect(on_context_menu)
         dlg.resize(620, 360)
         dlg.exec()
 
