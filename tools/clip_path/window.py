@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QPoint, QSize, QTimer, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QIcon, QKeyEvent, QPainter, QPalette, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QButtonGroup,
     QCheckBox,
@@ -160,6 +161,7 @@ class ClipPathWindow(QMainWindow):
         self.grid_input.setFixedHeight(self._toolbar_button_height)
         self.grid_check = QCheckBox()
         self.grid_check.setFixedHeight(self._toolbar_button_height)
+        self.grid_check.setChecked(True)
         grid_layout.addWidget(QLabel("Grid:"))
         grid_layout.addWidget(self.grid_input)
         grid_layout.addWidget(self.grid_check)
@@ -257,9 +259,6 @@ class ClipPathWindow(QMainWindow):
         self.canvas.update()
 
     def _on_size_changed(self, *_):
-        is_px = self.unit_px.isChecked()
-        self.size_h.setEnabled(is_px)
-        self.size_w.setEnabled(is_px)
         self.canvas.update()
         self._refresh_views()
 
@@ -670,6 +669,9 @@ class ClipPathWindow(QMainWindow):
         dlg.setWindowTitle("Clip-Path History")
         layout = QVBoxLayout(dlg)
         lst = QListWidget()
+        lst.setContextMenuPolicy(Qt.CustomContextMenu)
+        lst.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        lst.verticalScrollBar().setSingleStep(12)
         preview_size = QSize(144, 96)
         lst.setIconSize(preview_size)
         list_width = max(preview_size.width(), 288)
@@ -734,9 +736,11 @@ class ClipPathWindow(QMainWindow):
             action = menu.exec(lst.viewport().mapToGlobal(pos))
             if action != delete_action:
                 return
+            scroll_value = lst.verticalScrollBar().value()
             row = lst.row(item)
             removed = lst.takeItem(row)
             del removed
+            lst.verticalScrollBar().setValue(scroll_value)
             remaining: list[dict] = []
             for i in range(lst.count()):
                 payload = lst.item(i).data(Qt.UserRole)
