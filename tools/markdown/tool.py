@@ -11,13 +11,12 @@ class Tab(ToolBase):
     TOOL_NAME = "markdown"
     TOOL_DEFAULT_LABEL = "MarkDown"
     TOOL_ORDER = 0
-    TOOL_FILES = ["file.md"]
-    
-    def __init__(self, folder):
-        super().__init__()
+    TAB_FILES = ["file.md"]
 
-        self.folder = Path(folder)
-        self.file_path = self.folder / "file.md"
+    def __init__(self, tab_dir=None, tool_data_dir=None):
+        super().__init__(tab_dir=tab_dir, tool_data_dir=tool_data_dir)
+
+        self.file_path = self.tab_dir / "file.md"
 
         layout = QVBoxLayout(self)
 
@@ -149,3 +148,7 @@ class Tab(ToolBase):
         text = self.editor.toPlainText()
 
         self.file_path.write_text(text, encoding="utf-8")
+
+    def set_tab_dir(self, tab_dir):
+        super().set_tab_dir(tab_dir)
+        self.file_path = self.tab_dir / "file.md"

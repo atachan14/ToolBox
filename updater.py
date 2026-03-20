@@ -33,6 +33,8 @@ def apply_update(extract_dir, base_dir):
 
         if item.name == "updater.exe":
             continue
+        if item.name == "Users":
+            continue
 
         dest = base_dir / item.name
 

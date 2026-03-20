@@ -141,6 +141,8 @@ class ClampCalculator(QWidget):
 
     def set_last(self, name: str):
         self.last_edited = name
+        if hasattr(self.tool, "_save_state"):
+            self.tool._save_state()
 
     def handle_enter(self):
         focus = self.focusWidget()
@@ -337,6 +339,8 @@ class ClampCalculator(QWidget):
         self.max_px.setText(f"{float(entry.get('max_px', 0)):g}")
         self.set_last("form")
         self.min_px.setFocus()
+        if hasattr(self.tool, "_save_state"):
+            self.tool._save_state()
 
     def success_result(
         self,
@@ -415,3 +419,5 @@ class ClampCalculator(QWidget):
 
         self.last_edited = None
         self.free_input.setFocus()
+        if hasattr(self.tool, "_save_state"):
+            self.tool._save_state()

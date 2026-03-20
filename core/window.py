@@ -17,11 +17,11 @@ from PySide6.QtCore import QEvent, QSettings, Qt, QTimer, Signal
 import win32gui
 import win32con
 from core.flow_layout import FlowLayout
+from core.migration import migrate_user_data
 from core.plus_tab import PlusTab
 from core.tool_loader import load_tools
 from core.paths import TABS_DIR
-from core.tab_storage import create_tab_folder
-import json
+from core.tab_storage import create_tab_folder, ensure_tool_data_dir, iter_saved_tabs, load_tab_meta, save_tab_meta
 import shutil
 
 
@@ -98,6 +98,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("F2"), self, self.rename_current_hover_tab)
 
         self.tools = load_tools()
+        migrate_user_data()
 
         self.settings = QSettings("toolbox", "toolbox")
 
@@ -169,22 +170,21 @@ class MainWindow(QMainWindow):
                 continue
 
             folder = TABS_DIR / tab_name
-            meta_file = folder / "tool.json"
-
-            if not meta_file.exists():
+            if not folder.exists():
                 continue
 
-            data = json.loads(meta_file.read_text())
-
+            data = load_tab_meta(folder)
+            if not data:
+                continue
             data["order"] = i
-
-            meta_file.write_text(json.dumps(data, indent=2))
+            data["label"] = folder.name
+            save_tab_meta(folder, data)
         
     def open_tool(self, tool_class, replace_widget=None):
 
-        tab_name, folder = create_tab_folder(tool_class)
+        tab_name, folder, tool_data_dir = create_tab_folder(tool_class)
 
-        widget = tool_class(folder)
+        widget = tool_class(tab_dir=folder, tool_data_dir=tool_data_dir)
 
         if replace_widget:
             index = self.tabs.indexOf(replace_widget)
@@ -200,23 +200,7 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentIndex(plus_index)
             
     def restore_tabs(self):
-
-        tabs = []
-
-        for folder in TABS_DIR.iterdir():
-
-            meta_file = folder / "tool.json"
-
-            if not meta_file.exists():
-                continue
-
-            data = json.loads(meta_file.read_text())
-
-            tabs.append((data.get("order", 0), folder, data))
-
-        tabs.sort(key=lambda x: x[0])
-
-        for _, folder, data in tabs:
+        for _, folder, data in iter_saved_tabs():
 
             tool_name = data.get("tool")
             tool_class = self.tools.get(tool_name)
@@ -224,7 +208,10 @@ class MainWindow(QMainWindow):
             if not tool_class:
                 continue
 
-            widget = tool_class(folder)
+            widget = tool_class(
+                tab_dir=folder,
+                tool_data_dir=ensure_tool_data_dir(tool_name),
+            )
 
             plus_index = self.tabs.count() - 1
             self.tabs.insertTab(plus_index, widget, folder.name)
@@ -274,6 +261,15 @@ class MainWindow(QMainWindow):
         except OSError:
             QMessageBox.warning(self, "Error", "Rename failed.")
             return
+
+        widget = self.tabs._stack.widget(index)
+        if widget is not None and hasattr(widget, "set_tab_dir"):
+            widget.set_tab_dir(new_path)
+
+        meta = load_tab_meta(new_path)
+        if meta:
+            meta["label"] = new_name
+            save_tab_meta(new_path, meta)
 
         self.tabs.setTabText(index, new_name)
         

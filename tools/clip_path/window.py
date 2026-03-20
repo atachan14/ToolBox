@@ -53,7 +53,7 @@ class CodeLineEdit(QLineEdit):
 class ClipPathWindow(QMainWindow):
     MAX_HISTORY = 100
 
-    def __init__(self):
+    def __init__(self, state_path: Path | None = None, history_path: Path | None = None):
         super().__init__()
         self.points: list[ClipPoint] = []
         self.circles: list[CircleGuide] = []
@@ -64,7 +64,8 @@ class ClipPathWindow(QMainWindow):
         self.redo_stack: list[tuple[list[ClipPoint], list[CircleGuide]]] = []
 
         self.copy_feedback_base_text = ""
-        self.history_path = Path(__file__).resolve().parents[2] / "tabs" / "Clip-Path" / "history.json"
+        self.state_path = Path(state_path) if state_path else None
+        self.history_path = Path(history_path) if history_path else None
         self._table_syncing = False
         self._toolbar_button_height = 24
         self._code_full_text = "clip-path: polygon();"
@@ -72,7 +73,12 @@ class ClipPathWindow(QMainWindow):
 
         self._build_ui()
         self._connect_ui()
+        self._restore_state()
         self._refresh_views()
+
+    def set_state_path(self, state_path: Path | None):
+        self.state_path = Path(state_path) if state_path else None
+        self._save_state()
 
     def _build_ui(self):
         self.setWindowTitle("Clip-Path")
@@ -254,17 +260,118 @@ class ClipPathWindow(QMainWindow):
         self.reset_button.clicked.connect(self._reset_state)
         self.show_history_button.clicked.connect(self._show_history_dialog)
 
+    def _serialize_points(self, points: list[ClipPoint]) -> list[dict]:
+        return [{"x": point.x, "y": point.y} for point in points]
+
+    def _serialize_circles(self) -> list[dict]:
+        return [
+            {
+                "center": {"x": circle.center.x, "y": circle.center.y},
+                "radius": circle.radius,
+                "divisions": circle.divisions,
+                "snap_points": self._serialize_points(circle.snap_points),
+            }
+            for circle in self.circles
+        ]
+
+    def _restore_state(self):
+        if not self.state_path or not self.state_path.exists():
+            return
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8") or "{}")
+        except json.JSONDecodeError:
+            return
+        if not isinstance(state, dict):
+            return
+
+        points = state.get("points", [])
+        circles = state.get("circles", [])
+        self.points = [
+            ClipPoint(float(point.get("x", 0.0)), float(point.get("y", 0.0)))
+            for point in points
+            if isinstance(point, dict)
+        ]
+        restored_circles: list[CircleGuide] = []
+        for circle in circles:
+            if not isinstance(circle, dict):
+                continue
+            center = circle.get("center")
+            if not isinstance(center, dict):
+                continue
+            snap_points = circle.get("snap_points", [])
+            restored_circles.append(
+                CircleGuide(
+                    center=ClipPoint(float(center.get("x", 0.0)), float(center.get("y", 0.0))),
+                    radius=float(circle.get("radius", 0.0)),
+                    divisions=int(circle.get("divisions", 0)),
+                    snap_points=[
+                        ClipPoint(float(point.get("x", 0.0)), float(point.get("y", 0.0)))
+                        for point in snap_points
+                        if isinstance(point, dict)
+                    ],
+                )
+            )
+        self.circles = restored_circles
+
+        self.size_w.setValue(max(1, int(state.get("size_w", 100))))
+        self.size_h.setValue(max(1, int(state.get("size_h", 100))))
+        if state.get("unit") == "px":
+            self.unit_px.setChecked(True)
+        else:
+            self.unit_percent.setChecked(True)
+        self.grid_input.setValue(max(1, int(state.get("grid_value", 10))))
+        self.grid_check.setChecked(bool(state.get("grid_enabled", True)))
+
+        mode = state.get("mode", MODE_INPUT)
+        if mode == MODE_VIEW:
+            self.mode_screen.setChecked(True)
+            self.last_mode_button = self.mode_screen
+        elif mode == MODE_CIRCLE:
+            self.mode_circle.setChecked(True)
+            self.last_mode_button = self.mode_circle
+        else:
+            self.mode_input.setChecked(True)
+            self.last_mode_button = self.mode_input
+
+    def _save_state(self):
+        if not self.state_path:
+            return
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        checked = self.mode_group.checkedButton()
+        mode = MODE_INPUT
+        if checked is self.mode_screen:
+            mode = MODE_VIEW
+        elif checked is self.mode_circle:
+            mode = MODE_CIRCLE
+        payload = {
+            "points": self._serialize_points(self.points),
+            "circles": self._serialize_circles(),
+            "mode": mode,
+            "size_w": self.size_w.value(),
+            "size_h": self.size_h.value(),
+            "unit": "px" if self.unit_px.isChecked() else SIZE_TYPE_PERCENT,
+            "grid_value": self.grid_input.value(),
+            "grid_enabled": self.grid_check.isChecked(),
+        }
+        self.state_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
     def _on_mode_clicked(self, btn):
         self.last_mode_button = btn
         self.canvas.update()
+        self._save_state()
 
     def _on_size_changed(self, *_):
         self.canvas.update()
         self._refresh_views()
+        self._save_state()
 
     def _on_grid_changed(self, *_):
         self.canvas.update()
         self._refresh_views()
+        self._save_state()
 
     def _effective_mode(self) -> str:
         if self.ctrl_pressed:
@@ -350,6 +457,7 @@ class ClipPathWindow(QMainWindow):
         self._code_full_text = text
         self.code_label.setStyleSheet("padding: 0px 4px; background: transparent; border: none;")
         self._update_code_label_layout(reset_scroll=True)
+        self._save_state()
 
     def _fit_point_table_columns(self):
         total = max(self.point_table.viewport().width(), 120)
@@ -460,6 +568,7 @@ class ClipPathWindow(QMainWindow):
         self.circles = self._copy_circles(circles)
         self._refresh_views()
         self.canvas.update()
+        self._save_state()
 
     def _undo(self):
         if not self.undo_stack:
@@ -476,7 +585,7 @@ class ClipPathWindow(QMainWindow):
         self._apply_state(points, circles)
 
     def _load_history_entries(self) -> list[dict]:
-        if not self.history_path.exists():
+        if not self.history_path or not self.history_path.exists():
             return []
         try:
             loaded = json.loads(self.history_path.read_text(encoding="utf-8") or "[]")
@@ -502,6 +611,8 @@ class ClipPathWindow(QMainWindow):
         return entries
 
     def _save_history_entry(self, code: str):
+        if not self.history_path:
+            return
         self.history_path.parent.mkdir(parents=True, exist_ok=True)
         w, h, unit = self._get_size()
         entry = {"code": code, "size": {"w": w, "h": h, "unit": unit}}
@@ -574,10 +685,12 @@ class ClipPathWindow(QMainWindow):
         self.circles.append(CircleGuide(center=ClipPoint(cx, cy), radius=radius, divisions=divisions, snap_points=snaps))
         self._refresh_views()
         self.canvas.update()
+        self._save_state()
 
     def _on_circle_removed(self, index: int):
         if 0 <= index < len(self.circles):
             self.circles.pop(index)
+            self._save_state()
 
     def _reset_state(self):
         self.points = []
@@ -589,6 +702,7 @@ class ClipPathWindow(QMainWindow):
         self.canvas.pan.setY(0.0)
         self._refresh_views()
         self.canvas.update()
+        self._save_state()
 
     def _history_size_tuple(self, size_info: dict | None) -> tuple[float, float, str] | None:
         if not isinstance(size_info, dict):
@@ -733,6 +847,7 @@ class ClipPathWindow(QMainWindow):
                         self.unit_px.setChecked(True)
             self._refresh_views()
             self.canvas.update()
+            self._save_state()
 
         def on_context_menu(pos: QPoint):
             item = lst.itemAt(pos)
