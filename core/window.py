@@ -25,6 +25,7 @@ from core.migration import migrate_user_data
 from core.plus_tab import PlusTab
 from core.tool_loader import load_tools
 from core.paths import TABS_DIR
+from core.version import VERSION
 from core.tab_storage import (
     create_tab_folder,
     ensure_tool_data_dir,
@@ -160,7 +161,7 @@ class MainWindow(QMainWindow):
 
         self.settings = QSettings("toolbox", "toolbox")
 
-        self.setWindowTitle("Toolbox")
+        self.setWindowTitle(f"ToolBox v{VERSION}")
 
         self.tabs = WrappedTabWidget()
         self.tabs.tabBar().setMovable(True)
