@@ -4,11 +4,12 @@ import json
 import math
 from pathlib import Path
 
-from PySide6.QtCore import QSize, QTimer, Qt
+from PySide6.QtCore import QPoint, QSize, QTimer, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QIcon, QKeyEvent, QPainter, QPalette, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
+    QCheckBox,
     QDialog,
     QHBoxLayout,
     QHeaderView,
@@ -21,7 +22,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QMenu,
     QPushButton,
-    QScrollArea,
     QSpinBox,
     QSplitter,
     QTableWidget,
@@ -33,6 +33,20 @@ from PySide6.QtWidgets import (
 from core.flow_layout import FlowLayout
 from .canvas import CanvasConfig, ClipPathCanvas
 from .state import MODE_CIRCLE, MODE_INPUT, MODE_VIEW, SIZE_TYPE_PERCENT, CircleGuide, ClipPoint
+
+
+class CodeLineEdit(QLineEdit):
+    def __init__(self, click_handler, wheel_handler, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._click_handler = click_handler
+        self._wheel_handler = wheel_handler
+
+    def mousePressEvent(self, event):
+        self._click_handler(event)
+        super().mousePressEvent(event)
+
+    def wheelEvent(self, event: QWheelEvent):
+        self._wheel_handler(event)
 
 
 class ClipPathWindow(QMainWindow):
@@ -51,6 +65,9 @@ class ClipPathWindow(QMainWindow):
         self.copy_feedback_base_text = ""
         self.history_path = Path(__file__).resolve().parents[2] / "tabs" / "Clip-Path" / "history.json"
         self._table_syncing = False
+        self._toolbar_button_height = 24
+        self._code_full_text = "clip-path: polygon();"
+        self._code_scroll_offset = 0
 
         self._build_ui()
         self._connect_ui()
@@ -65,7 +82,7 @@ class ClipPathWindow(QMainWindow):
         root_layout.setSpacing(6)
 
         toolbar = QWidget()
-        toolbar_layout = FlowLayout(toolbar, margin=0, spacing=3)
+        toolbar_layout = FlowLayout(toolbar, margin=0, spacing=2)
 
         border_color = self.palette().color(QPalette.Mid).name()
         toolbar.setStyleSheet(
@@ -80,13 +97,15 @@ class ClipPathWindow(QMainWindow):
         mode_box = QWidget()
         mode_box.setObjectName("mode_box")
         mode_layout = QHBoxLayout(mode_box)
-        mode_layout.setContentsMargins(4, 1, 4, 1)
+        mode_layout.setContentsMargins(4, 2, 4, 2)
+        mode_layout.setSpacing(2)
         self.mode_input = QPushButton("入力")
         self.mode_screen = QPushButton("画面")
         self.mode_circle = QPushButton("円")
         for btn in (self.mode_input, self.mode_screen, self.mode_circle):
             btn.setCheckable(True)
-            btn.setStyleSheet("padding: 0px 3px;")
+            btn.setFixedHeight(self._toolbar_button_height)
+            btn.setStyleSheet("padding: 0px 6px;")
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
         for btn in (self.mode_input, self.mode_screen, self.mode_circle):
@@ -98,7 +117,8 @@ class ClipPathWindow(QMainWindow):
         size_box = QWidget()
         size_box.setObjectName("size_box")
         size_layout = QHBoxLayout(size_box)
-        size_layout.setContentsMargins(4, 1, 4, 1)
+        size_layout.setContentsMargins(4, 2, 4, 2)
+        size_layout.setSpacing(2)
         self.size_h = QSpinBox()
         self.size_w = QSpinBox()
         for spin in (self.size_h, self.size_w):
@@ -106,12 +126,15 @@ class ClipPathWindow(QMainWindow):
             spin.setValue(100)
             spin.setButtonSymbols(QSpinBox.NoButtons)
             spin.setFixedWidth(46)
+            spin.setFixedHeight(self._toolbar_button_height)
         self.unit_px = QPushButton("px")
         self.unit_percent = QPushButton("%")
         self.unit_px.setCheckable(True)
         self.unit_percent.setCheckable(True)
-        self.unit_px.setStyleSheet("padding: 0px 3px;")
-        self.unit_percent.setStyleSheet("padding: 0px 3px;")
+        self.unit_px.setFixedHeight(self._toolbar_button_height)
+        self.unit_percent.setFixedHeight(self._toolbar_button_height)
+        self.unit_px.setStyleSheet("padding: 0px 6px;")
+        self.unit_percent.setStyleSheet("padding: 0px 6px;")
         self.unit_group = QButtonGroup(self)
         self.unit_group.setExclusive(True)
         self.unit_group.addButton(self.unit_px)
@@ -122,34 +145,24 @@ class ClipPathWindow(QMainWindow):
         size_layout.addWidget(QLabel("w:"))
         size_layout.addWidget(self.size_w)
         size_layout.addWidget(self.unit_px)
-        size_layout.addWidget(QLabel("/"))
         size_layout.addWidget(self.unit_percent)
 
         grid_box = QWidget()
         grid_box.setObjectName("grid_box")
         grid_layout = QHBoxLayout(grid_box)
-        grid_layout.setContentsMargins(4, 1, 4, 1)
+        grid_layout.setContentsMargins(4, 2, 4, 2)
+        grid_layout.setSpacing(2)
         self.grid_input = QSpinBox()
         self.grid_input.setRange(1, 999)
         self.grid_input.setValue(10)
         self.grid_input.setButtonSymbols(QSpinBox.NoButtons)
         self.grid_input.setFixedWidth(46)
-        self.grid_on = QPushButton("ON")
-        self.grid_off = QPushButton("OFF")
-        self.grid_on.setCheckable(True)
-        self.grid_off.setCheckable(True)
-        self.grid_on.setStyleSheet("padding: 0px 3px;")
-        self.grid_off.setStyleSheet("padding: 0px 3px;")
-        self.grid_group = QButtonGroup(self)
-        self.grid_group.setExclusive(True)
-        self.grid_group.addButton(self.grid_on)
-        self.grid_group.addButton(self.grid_off)
-        self.grid_off.setChecked(True)
+        self.grid_input.setFixedHeight(self._toolbar_button_height)
+        self.grid_check = QCheckBox()
+        self.grid_check.setFixedHeight(self._toolbar_button_height)
         grid_layout.addWidget(QLabel("Grid:"))
         grid_layout.addWidget(self.grid_input)
-        grid_layout.addWidget(self.grid_on)
-        grid_layout.addWidget(QLabel("/"))
-        grid_layout.addWidget(self.grid_off)
+        grid_layout.addWidget(self.grid_check)
 
         toolbar_layout.addWidget(mode_box)
         toolbar_layout.addWidget(size_box)
@@ -192,8 +205,11 @@ class ClipPathWindow(QMainWindow):
         right_layout.addWidget(self.point_table)
 
         buttons = QHBoxLayout()
+        buttons.setSpacing(4)
         self.reset_button = QPushButton("Reset")
         self.show_history_button = QPushButton("履歴を表示")
+        self.reset_button.setFixedHeight(self._toolbar_button_height)
+        self.show_history_button.setFixedHeight(self._toolbar_button_height)
         buttons.addWidget(self.reset_button)
         buttons.addWidget(self.show_history_button)
         right_layout.addLayout(buttons)
@@ -212,22 +228,14 @@ class ClipPathWindow(QMainWindow):
         self.cursor_label.setFixedWidth(cursor_width + 8)
         footer.addWidget(self.cursor_label)
 
-        self.code_area = QScrollArea()
-        self.code_area.setFrameShape(QScrollArea.NoFrame)
-        self.code_area.setWidgetResizable(False)
-        self.code_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.code_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.code_area.setFixedHeight(30)
-        self.code_label = QLabel("clip-path: polygon();")
-        self.code_label.setWordWrap(False)
+        self.code_label = CodeLineEdit(self._on_code_clicked, self._on_code_wheel)
+        self.code_label.setReadOnly(True)
+        self.code_label.setFrame(False)
+        self.code_label.setFixedHeight(30)
+        self.code_label.setText(self._code_full_text)
         self.code_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.code_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.code_label.setStyleSheet("padding: 4px;")
-        self.code_area.setWidget(self.code_label)
-        self.code_area.mousePressEvent = self._on_code_clicked
-        self.code_label.mousePressEvent = self._on_code_clicked
-        self.code_area.wheelEvent = self._on_code_wheel
-        footer.addWidget(self.code_area, 1)
+        self.code_label.setStyleSheet("padding: 0px 4px; background: transparent; border: none;")
+        footer.addWidget(self.code_label, 1)
         root_layout.addLayout(footer)
 
         self.setCentralWidget(body)
@@ -240,8 +248,7 @@ class ClipPathWindow(QMainWindow):
         self.unit_px.clicked.connect(self._on_size_changed)
         self.unit_percent.clicked.connect(self._on_size_changed)
         self.grid_input.valueChanged.connect(self._on_grid_changed)
-        self.grid_on.clicked.connect(self._on_grid_changed)
-        self.grid_off.clicked.connect(self._on_grid_changed)
+        self.grid_check.toggled.connect(self._on_grid_changed)
         self.reset_button.clicked.connect(self._reset_state)
         self.show_history_button.clicked.connect(self._show_history_dialog)
 
@@ -272,7 +279,7 @@ class ClipPathWindow(QMainWindow):
         return float(self.size_w.value()), float(self.size_h.value()), unit
 
     def _get_grid(self) -> tuple[bool, int]:
-        return self.grid_on.isChecked(), max(1, self.grid_input.value())
+        return self.grid_check.isChecked(), max(1, self.grid_input.value())
 
     def _get_snap_points(self) -> list[ClipPoint]:
         points: list[ClipPoint] = []
@@ -334,9 +341,9 @@ class ClipPathWindow(QMainWindow):
 
         text = self._build_code()
         self.copy_feedback_base_text = text
-        self.code_label.setStyleSheet("padding: 4px;")
-        self.code_label.setText(text)
-        self._update_code_label_layout()
+        self._code_full_text = text
+        self.code_label.setStyleSheet("padding: 0px 4px; background: transparent; border: none;")
+        self._update_code_label_layout(reset_scroll=True)
 
     def _fit_point_table_columns(self):
         total = max(self.point_table.viewport().width(), 120)
@@ -352,14 +359,77 @@ class ClipPathWindow(QMainWindow):
         self._fit_point_table_columns()
         self._update_code_label_layout()
 
+    def _code_max_scroll_offset(self, text: str, available_width: int, font_metrics: QFontMetrics) -> int:
+        ellipsis = "..."
+        if font_metrics.horizontalAdvance(text) <= available_width:
+            return 0
+        for offset in range(len(text)):
+            prefix = ellipsis if offset > 0 else ""
+            candidate = f"{prefix}{text[offset:]}"
+            if font_metrics.horizontalAdvance(candidate) <= available_width:
+                return offset
+        return max(0, len(text) - 1)
+
+    def _code_display_text(self, text: str, offset: int, available_width: int, font_metrics: QFontMetrics) -> tuple[str, bool]:
+        prefix = "..." if offset > 0 else ""
+        visible = text[offset:]
+        has_tail = False
+        while visible and font_metrics.horizontalAdvance(f"{prefix}{visible}") > available_width:
+            visible = visible[:-1]
+            has_tail = True
+        if not visible:
+            visible = text[min(offset, len(text) - 1)]
+            has_tail = offset < len(text) - 1
+        suffix = "..." if has_tail else ""
+        display_text = f"{prefix}{visible}{suffix}"
+        while display_text and font_metrics.horizontalAdvance(display_text) > available_width:
+            if has_tail and len(visible) > 1:
+                visible = visible[:-1]
+                display_text = f"{prefix}{visible}..."
+                continue
+            display_text = font_metrics.elidedText(display_text, Qt.ElideRight, available_width)
+            break
+        return display_text, has_tail
+
     def _update_code_label_layout(self, reset_scroll: bool = False):
-        text_width = self.code_label.sizeHint().width()
-        viewport_width = self.code_area.viewport().width()
-        target_width = max(text_width, viewport_width)
-        self.code_label.setFixedWidth(target_width)
-        bar = self.code_area.horizontalScrollBar()
+        text = self._code_full_text
+        metrics = self.code_label.fontMetrics()
+        available_width = max(1, self.code_label.width() - 8)
         if reset_scroll:
-            bar.setValue(bar.maximum())
+            self._code_scroll_offset = 0
+        if metrics.horizontalAdvance(text) <= available_width:
+            self.code_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.code_label.setText(text)
+            self.code_label.setCursorPosition(len(text))
+            self._code_scroll_offset = 0
+            return
+
+        self.code_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        max_offset = self._code_max_scroll_offset(text, available_width, metrics)
+        self._code_scroll_offset = max(0, min(self._code_scroll_offset, max_offset))
+        display_text, _ = self._code_display_text(text, self._code_scroll_offset, available_width, metrics)
+        self.code_label.setText(display_text)
+        self.code_label.setCursorPosition(0)
+
+    def _on_code_wheel(self, event: QWheelEvent):
+        if not self._code_full_text:
+            event.ignore()
+            return
+        metrics = self.code_label.fontMetrics()
+        available_width = max(1, self.code_label.width() - 8)
+        if metrics.horizontalAdvance(self._code_full_text) <= available_width:
+            event.ignore()
+            return
+        delta = event.angleDelta().y()
+        if delta == 0:
+            event.ignore()
+            return
+        step = max(1, (abs(delta) // 120) * 3)
+        direction = -1 if delta > 0 else 1
+        max_offset = self._code_max_scroll_offset(self._code_full_text, available_width, metrics)
+        self._code_scroll_offset = max(0, min(max_offset, self._code_scroll_offset + (direction * step)))
+        self._update_code_label_layout()
+        event.accept()
 
     def _clone_points(self) -> list[ClipPoint]:
         return [ClipPoint(p.x, p.y) for p in self.points]
@@ -437,14 +507,16 @@ class ClipPathWindow(QMainWindow):
 
     def _on_code_clicked(self, _event):
         if len(self.points) <= 2:
-            self.code_label.setStyleSheet("padding: 4px; color: #f7768e;")
+            self._code_full_text = "3つ以上の点を配置してください"
+            self.code_label.setStyleSheet("padding: 0px 4px; color: #f7768e; background: transparent; border: none;")
             self.code_label.setText("3つ以上の点を配置してください")
             self._update_code_label_layout(reset_scroll=True)
 
             def _restore_error():
-                self.code_label.setStyleSheet("padding: 4px;")
+                self._code_full_text = self.copy_feedback_base_text
+                self.code_label.setStyleSheet("padding: 0px 4px; background: transparent; border: none;")
                 self.code_label.setText(self.copy_feedback_base_text)
-                self._update_code_label_layout()
+                self._update_code_label_layout(reset_scroll=True)
 
             QTimer.singleShot(900, _restore_error)
             return
@@ -452,24 +524,18 @@ class ClipPathWindow(QMainWindow):
         code = self._build_code()
         QApplication.clipboard().setText(code)
         self._save_history_entry(code)
-        self.code_label.setStyleSheet("padding: 4px; color: #4ecdc4;")
+        self._code_full_text = "copy and saved"
+        self.code_label.setStyleSheet("padding: 0px 4px; color: #4ecdc4; background: transparent; border: none;")
         self.code_label.setText("copy and saved")
         self._update_code_label_layout(reset_scroll=True)
 
         def _restore():
-            self.code_label.setStyleSheet("padding: 4px;")
+            self._code_full_text = self.copy_feedback_base_text
+            self.code_label.setStyleSheet("padding: 0px 4px; background: transparent; border: none;")
             self.code_label.setText(self.copy_feedback_base_text)
-            self._update_code_label_layout()
+            self._update_code_label_layout(reset_scroll=True)
 
         QTimer.singleShot(700, _restore)
-
-    def _on_code_wheel(self, event: QWheelEvent):
-        delta = event.angleDelta().y()
-        if delta == 0:
-            return
-        bar = self.code_area.horizontalScrollBar()
-        bar.setValue(bar.value() - int(delta / 4))
-        event.accept()
 
     def _on_row_edit_finished(self, row: int):
         if self._table_syncing or row >= len(self.points):
@@ -512,26 +578,30 @@ class ClipPathWindow(QMainWindow):
         self.circles = []
         self.undo_stack.clear()
         self.redo_stack.clear()
-        self.mode_input.setChecked(True)
-        self.grid_off.setChecked(True)
-        self.grid_input.setValue(10)
-        self.unit_px.setChecked(True)
-        self.size_w.setValue(100)
-        self.size_h.setValue(100)
         self.canvas.zoom = 1.0
         self.canvas.pan.setX(0.0)
         self.canvas.pan.setY(0.0)
         self._refresh_views()
         self.canvas.update()
 
-    def _parse_code_to_points(self, code: str) -> list[ClipPoint] | None:
+    def _history_size_tuple(self, size_info: dict | None) -> tuple[float, float, str] | None:
+        if not isinstance(size_info, dict):
+            return None
+        w = size_info.get("w")
+        h = size_info.get("h")
+        unit = size_info.get("unit")
+        if not isinstance(w, (int, float)) or not isinstance(h, (int, float)) or not isinstance(unit, str):
+            return None
+        return float(w), float(h), unit
+
+    def _parse_code_to_points(self, code: str, size_override: tuple[float, float, str] | None = None) -> list[ClipPoint] | None:
         if "polygon(" not in code:
             return None
         inside = code.split("polygon(", 1)[1].split(")", 1)[0]
         if not inside.strip():
             return []
         out: list[ClipPoint] = []
-        w, h, unit = self._get_size()
+        w, h, unit = size_override or self._get_size()
         for pair in inside.split(","):
             vals = pair.strip().split()
             if len(vals) != 2:
@@ -546,13 +616,13 @@ class ClipPathWindow(QMainWindow):
                 out.append(ClipPoint(x / max(w, 1.0), y / max(h, 1.0)))
         return out
 
-    def _make_shape_icon(self, code: str) -> QPixmap:
+    def _make_shape_icon(self, code: str, size_info: dict | None = None) -> QPixmap:
         pix = QPixmap(144, 96)
         pix.fill(QColor("#1f2330"))
         p = QPainter(pix)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(QPen(QColor("#7aa2f7"), 2))
-        points = self._parse_code_to_points(code) or []
+        points = self._parse_code_to_points(code, self._history_size_tuple(size_info)) or []
         if len(points) > 1:
             mapped = [(18 + pt.x * 108, 12 + pt.y * 72) for pt in points]
             for i in range(len(mapped) - 1):
@@ -620,7 +690,7 @@ class ClipPathWindow(QMainWindow):
             preview_text = self._build_history_preview(f"{code}{size_suffix}", preview_text_width, 2, QFontMetrics(lst.font()))
             item = QListWidgetItem(preview_text)
             item.setData(Qt.UserRole, entry)
-            item.setIcon(QIcon(self._make_shape_icon(code)))
+            item.setIcon(QIcon(self._make_shape_icon(code, size_info)))
             item.setSizeHint(QSize(item.sizeHint().width(), preview_size.height() + (line_height * 2) + 14))
             lst.addItem(item)
         layout.addWidget(lst)
@@ -630,7 +700,10 @@ class ClipPathWindow(QMainWindow):
             code = payload.get("code") if isinstance(payload, dict) else None
             if not isinstance(code, str):
                 return
-            parsed = self._parse_code_to_points(code)
+            parsed = self._parse_code_to_points(
+                code,
+                self._history_size_tuple(payload.get("size") if isinstance(payload, dict) else None),
+            )
             if parsed is None:
                 return
             self._push_undo_state()
@@ -664,11 +737,11 @@ class ClipPathWindow(QMainWindow):
             row = lst.row(item)
             removed = lst.takeItem(row)
             del removed
-            remaining: list[str] = []
+            remaining: list[dict] = []
             for i in range(lst.count()):
-                code = lst.item(i).data(Qt.UserRole)
-                if isinstance(code, str):
-                    remaining.append(code)
+                payload = lst.item(i).data(Qt.UserRole)
+                if isinstance(payload, dict) and isinstance(payload.get("code"), str):
+                    remaining.append(payload)
             self.history_path.parent.mkdir(parents=True, exist_ok=True)
             self.history_path.write_text(json.dumps(remaining, ensure_ascii=False, indent=2), encoding="utf-8")
 
