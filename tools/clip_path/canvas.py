@@ -51,7 +51,7 @@ class ClipPathCanvas(QWidget):
         self.margin = 24
 
         self.setMouseTracking(True)
-        self.setMinimumSize(280, 280)
+        # self.setMinimumSize(80, 80)
         self.setFocusPolicy(Qt.StrongFocus)
 
     def set_temp_mode(self, mode: str | None):
