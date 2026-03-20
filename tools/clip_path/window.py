@@ -140,7 +140,7 @@ class ClipPathWindow(QMainWindow):
         self.unit_group.setExclusive(True)
         self.unit_group.addButton(self.unit_px)
         self.unit_group.addButton(self.unit_percent)
-        self.unit_px.setChecked(True)
+        self.unit_percent.setChecked(True)
         size_layout.addWidget(QLabel("h:"))
         size_layout.addWidget(self.size_h)
         size_layout.addWidget(QLabel("w:"))
@@ -291,11 +291,18 @@ class ClipPathWindow(QMainWindow):
         out_x, out_y = self._to_output(point)
         self.cursor_label.setText(f"Cursor: x={out_x}, y={out_y}")
 
+    def _format_measure(self, value: float, suffix: str, digits: int) -> str:
+        rounded = round(value, digits)
+        if float(rounded).is_integer():
+            return f"{int(rounded)}{suffix}"
+        text = f"{rounded:.{digits}f}".rstrip("0").rstrip(".")
+        return f"{text}{suffix}"
+
     def _to_output(self, point: ClipPoint) -> tuple[str, str]:
         width, height, unit = self._get_size()
         if unit == SIZE_TYPE_PERCENT:
-            return f"{point.x * 100:.2f}%", f"{point.y * 100:.2f}%"
-        return f"{point.x * width:.1f}px", f"{point.y * height:.1f}px"
+            return self._format_measure(point.x * 100, "%", 2), self._format_measure(point.y * 100, "%", 2)
+        return self._format_measure(point.x * width, "px", 1), self._format_measure(point.y * height, "px", 1)
 
     def _to_table_output(self, point: ClipPoint) -> tuple[str, str]:
         return self._to_output(point)

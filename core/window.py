@@ -35,6 +35,57 @@ def _mix_colors(base, overlay, ratio):
         round(base.alpha() * inv + overlay.alpha() * ratio),
     )
 
+
+class CloseTabButton(QToolButton):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._background = QColor("transparent")
+        self._hover_background = QColor("transparent")
+        self._border = QColor("transparent")
+        self._icon = QColor("black")
+        self._hovered = False
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAutoRaise(True)
+        self.setFixedSize(14, 14)
+
+    def set_colors(self, background, hover_background, border, icon):
+        self._background = QColor(background)
+        self._hover_background = QColor(hover_background)
+        self._border = QColor(border)
+        self._icon = QColor(icon)
+        self.update()
+
+    def enterEvent(self, event):
+        self._hovered = True
+        parent = self.parentWidget()
+        if parent is not None and hasattr(parent, "_refresh_style"):
+            parent._refresh_style()
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        parent = self.parentWidget()
+        if parent is not None and hasattr(parent, "_refresh_style"):
+            parent._refresh_style()
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+
+        painter.fillRect(self.rect(), self._hover_background if self._hovered else self._background)
+        painter.setPen(QPen(self._border))
+        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
+
+        pen = QPen(self._icon)
+        pen.setWidth(1)
+        painter.setPen(pen)
+        painter.drawLine(4, 4, 9, 9)
+        painter.drawLine(9, 4, 4, 9)
+
 class MainWindow(QMainWindow):
     
 
@@ -291,21 +342,16 @@ class WrappedTabButton(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setMouseTracking(True)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        self.setCursor(Qt.PointingHandCursor)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 4, 8, 4)
-        layout.setSpacing(6)
+        layout.setContentsMargins(10, 4, 4, 4)
+        layout.setSpacing(3)
 
         self.label = QLabel(text)
         layout.addWidget(self.label)
 
-        self.close_button = QToolButton()
+        self.close_button = CloseTabButton()
         self.close_button.setObjectName("wrapped_tab_close")
-        self.close_button.setText("x")
-        self.close_button.setAutoRaise(True)
-        self.close_button.setCursor(Qt.ArrowCursor)
-        self.close_button.setFixedSize(14, 14)
         self.close_button.clicked.connect(self.close_requested.emit)
         layout.addWidget(self.close_button)
 
@@ -324,7 +370,7 @@ class WrappedTabButton(QWidget):
 
     def set_closable(self, closable):
         self.close_button.setVisible(closable)
-        right_margin = 8 if closable else 10
+        right_margin = 4 if closable else 10
         self.layout().setContentsMargins(10, 4, right_margin, 4)
         self.updateGeometry()
 
@@ -377,18 +423,20 @@ class WrappedTabButton(QWidget):
         text = palette.color(QPalette.ColorRole.ButtonText)
         close_text = palette.color(QPalette.ColorRole.Text)
         outer_border = _mix_colors(background, border, 0.65)
-        inner_border = _mix_colors(panel, border, 0.18)
         hover_fill = _mix_colors(background, accent, 0.14)
         selected_fill = _mix_colors(panel, accent, 0.22)
         hover_border = _mix_colors(outer_border, accent, 0.32)
         selected_border = _mix_colors(outer_border, accent, 0.48)
         inactive_top = _mix_colors(background, border, 0.22)
         hover_top = _mix_colors(accent, panel, 0.28)
+        close_fill = _mix_colors(background, panel, 0.18)
+        close_border = _mix_colors(outer_border, border, 0.35)
 
         fill = selected_fill if self._current else hover_fill if self._hovered else background
         edge = selected_border if self._current else hover_border if self._hovered else outer_border
         top_line = accent if self._current else hover_top if self._hovered else inactive_top
-        close_hover = _mix_colors(panel, accent, 0.18).name()
+        close_hover_fill = _mix_colors(close_fill, accent, 0.18)
+        close_border_hover = _mix_colors(close_border, accent, 0.22)
 
         self.setStyleSheet(
             f"""
@@ -415,17 +463,16 @@ class WrappedTabButton(QWidget):
             }}
             QToolButton#wrapped_tab_close {{
                 background: transparent;
-                border: 1px solid transparent;
-                color: {close_text.name()};
+                border: none;
                 padding: 0;
-                border-radius: 2px;
-            }}
-            QToolButton#wrapped_tab_close:hover {{
-                background: {close_hover};
-                color: {text.name()};
-                border-color: {inner_border.name()};
             }}
             """
+        )
+        self.close_button.set_colors(
+            QColor("transparent"),
+            close_hover_fill,
+            close_border_hover if self.close_button._hovered else close_border,
+            text if self.close_button._hovered else close_text,
         )
 
 

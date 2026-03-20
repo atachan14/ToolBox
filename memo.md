@@ -7,8 +7,6 @@
 
         - タブを外にドラッグして別Windowにする。
         - 終了時に開いてたタブを再起動時に選択
-
-        - ToolsのPlugin化（設定保存用）
         - color調整
 
 ## markdown ##
@@ -28,7 +26,6 @@
             3.color
 
 # 新規Tool案 #
-    - Clip-path Polygon Editor
     - linear-gradient
     - クリップボード
 

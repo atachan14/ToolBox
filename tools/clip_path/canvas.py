@@ -36,6 +36,7 @@ class ClipPathCanvas(QWidget):
         self.dragging_index: int | None = None
         self.pending_insert_index: int | None = None
         self.panning = False
+        self.middle_panning = False
         self.circle_drag_start: ClipPoint | None = None
         self.circle_drag_current: ClipPoint | None = None
         self.rotating_circle_index: int | None = None
@@ -198,6 +199,7 @@ class ClipPathCanvas(QWidget):
             return
 
         if event.button() == Qt.MiddleButton:
+            self.middle_panning = True
             self.panning = True
             return
 
@@ -249,7 +251,7 @@ class ClipPathCanvas(QWidget):
             self.update()
             return
 
-        if self.panning:
+        if self.panning or self.middle_panning:
             delta = event.position() - self.last_mouse_screen
             self.pan += delta
             self.last_mouse_screen = event.position()
@@ -280,10 +282,12 @@ class ClipPathCanvas(QWidget):
                 self.rotating_circle_index = None
             self.dragging_index = None
             self.pending_insert_index = None
-            self.panning = False
+            if not self.middle_panning:
+                self.panning = False
             return
 
         if event.button() == Qt.MiddleButton:
+            self.middle_panning = False
             self.panning = False
 
     def wheelEvent(self, event: QWheelEvent):
