@@ -1,11 +1,15 @@
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
+    QPushButton,
     QSizePolicy,
     QStackedWidget,
     QToolButton,
@@ -21,8 +25,16 @@ from core.migration import migrate_user_data
 from core.plus_tab import PlusTab
 from core.tool_loader import load_tools
 from core.paths import TABS_DIR
-from core.tab_storage import create_tab_folder, ensure_tool_data_dir, iter_saved_tabs, load_tab_meta, save_tab_meta
-import shutil
+from core.tab_storage import (
+    create_tab_folder,
+    ensure_tool_data_dir,
+    iter_saved_tabs,
+    iter_trashed_tabs,
+    load_tab_meta,
+    move_tab_to_trash,
+    restore_tab_from_trash,
+    save_tab_meta,
+)
 
 
 def _mix_colors(base, overlay, ratio):
@@ -86,6 +98,52 @@ class CloseTabButton(QToolButton):
         painter.drawLine(4, 4, 9, 9)
         painter.drawLine(9, 4, 4, 9)
 
+
+class RestoreTabsDialog(QDialog):
+
+    def __init__(self, items, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Restore Closed Tab")
+        self.resize(360, 320)
+        self.selected_folder_name = None
+
+        layout = QVBoxLayout(self)
+
+        self.list_widget = QListWidget()
+        for item in reversed(items):
+            label = item["folder_name"]
+            deleted_at = item.get("deleted_at")
+            if deleted_at:
+                label = f"{label} ({deleted_at})"
+            list_item = QListWidgetItem(label)
+            list_item.setData(Qt.UserRole, item["folder_name"])
+            self.list_widget.addItem(list_item)
+        self.list_widget.itemDoubleClicked.connect(self._restore_selected)
+        layout.addWidget(self.list_widget)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+
+        restore_button = QPushButton("Restore")
+        restore_button.clicked.connect(self._restore_selected)
+        button_row.addWidget(restore_button)
+
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_row.addWidget(cancel_button)
+
+        layout.addLayout(button_row)
+
+        if self.list_widget.count() > 0:
+            self.list_widget.setCurrentRow(0)
+
+    def _restore_selected(self):
+        item = self.list_widget.currentItem()
+        if item is None:
+            return
+        self.selected_folder_name = item.data(Qt.UserRole)
+        self.accept()
+
 class MainWindow(QMainWindow):
     
 
@@ -145,10 +203,7 @@ class MainWindow(QMainWindow):
             return
 
         tab_name = self.tabs.tabText(index)
-        tab_folder = TABS_DIR / tab_name
-
-        if tab_folder.exists() and tab_folder.is_dir():
-            shutil.rmtree(tab_folder)
+        move_tab_to_trash(tab_name)
 
         self.tabs.removeTab(index)
         
@@ -198,6 +253,44 @@ class MainWindow(QMainWindow):
 
             self.tabs.insertTab(plus_index, widget, tab_name)
             self.tabs.setCurrentIndex(plus_index)
+
+    def restore_closed_tab(self):
+        items = iter_trashed_tabs()
+        if not items:
+            QMessageBox.information(self, "Restore Closed Tab", "No closed tabs found.")
+            return
+
+        dialog = RestoreTabsDialog(items, self)
+        if dialog.exec() != QDialog.Accepted or not dialog.selected_folder_name:
+            return
+
+        selected = next(
+            (item for item in items if item["folder_name"] == dialog.selected_folder_name),
+            None,
+        )
+        if selected is None:
+            QMessageBox.warning(self, "Restore Failed", "The selected tab no longer exists.")
+            return
+
+        meta = selected["meta"]
+        tool_name = meta.get("tool")
+        tool_class = self.tools.get(tool_name)
+        if not tool_class:
+            QMessageBox.warning(self, "Restore Failed", "The tool for this tab is not available.")
+            return
+
+        folder = restore_tab_from_trash(dialog.selected_folder_name)
+        if folder is None:
+            QMessageBox.warning(self, "Restore Failed", "Could not restore the selected tab.")
+            return
+
+        widget = tool_class(
+            tab_dir=folder,
+            tool_data_dir=ensure_tool_data_dir(tool_name),
+        )
+        plus_index = self.tabs.count() - 1
+        self.tabs.insertTab(plus_index, widget, folder.name)
+        self.tabs.setCurrentIndex(plus_index)
             
     def restore_tabs(self):
         for _, folder, data in iter_saved_tabs():
@@ -692,11 +785,15 @@ class FixedTabBar(QWidget):
 
     def _show_context_menu(self, button, global_pos):
         index = self._buttons.index(button)
+        menu = QMenu(self)
 
         if self.tabText(index) == "+":
+            restore = menu.addAction("閉じたタブを復元")
+            action = menu.exec(global_pos)
+            if action == restore:
+                self.window().restore_closed_tab()
             return
 
-        menu = QMenu(self)
         rename = menu.addAction("Rename")
         close = menu.addAction("Close")
         action = menu.exec(global_pos)
