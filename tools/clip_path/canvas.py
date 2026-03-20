@@ -17,7 +17,8 @@ class CanvasConfig:
     size_getter: Callable[[], tuple[float, float, str]]
     grid_getter: Callable[[], tuple[bool, int]]
     on_points_changed: Callable[[], None]
-    on_cursor_changed: Callable[[float, float], None]
+    on_cursor_changed: Callable[[ClipPoint, ClipPoint], None]
+    on_push_history: Callable[[], None]
 
 
 class ClipPathCanvas(QWidget):
@@ -28,6 +29,7 @@ class ClipPathCanvas(QWidget):
         self.config = config
 
         self.dragging_index: int | None = None
+        self.pending_insert_index: int | None = None
         self.panning = False
         self.last_mouse_scene = QPointF(0, 0)
         self.last_mouse_screen = QPointF(0, 0)
@@ -112,12 +114,23 @@ class ClipPathCanvas(QWidget):
         if not active:
             return point
 
-        step = 1.0 / max(1, grid_value)
+        step_x, step_y = self._grid_steps_normalized(max(1, grid_value))
 
         return ClipPoint(
-            round(point.x / step) * step,
-            round(point.y / step) * step,
+            round(point.x / step_x) * step_x,
+            round(point.y / step_y) * step_y,
         )
+
+    def _grid_steps_normalized(self, grid_value: int) -> tuple[float, float]:
+        size_w, size_h, unit = self.config.size_getter()
+
+        if unit == "px":
+            step_x = grid_value / max(size_w, 1.0)
+            step_y = grid_value / max(size_h, 1.0)
+            return max(step_x, 1e-6), max(step_y, 1e-6)
+
+        step = grid_value / 100.0
+        return max(step, 1e-6), max(step, 1e-6)
 
     def _find_hit_point(self, scene_pos: QPointF) -> int | None:
         points = self.config.points_getter()
@@ -153,6 +166,10 @@ class ClipPathCanvas(QWidget):
             self.panning = True
             return
 
+        if event.button() == Qt.MiddleButton:
+            self.panning = True
+            return
+
         if mode != MODE_INPUT:
             return
 
@@ -160,11 +177,14 @@ class ClipPathCanvas(QWidget):
             hit_idx = self._find_hit_point(scene_pos)
 
             if hit_idx is not None:
+                self.config.on_push_history()
                 self.dragging_index = hit_idx
                 return
 
             normalized = self._scene_to_normalized(scene_pos)
+            self.config.on_push_history()
             points.append(self._snap_normalized(normalized))
+            self.pending_insert_index = len(points) - 1
             self.config.on_points_changed()
             self.update()
             return
@@ -173,14 +193,16 @@ class ClipPathCanvas(QWidget):
             hit_idx = self._find_hit_point(scene_pos)
 
             if hit_idx is not None:
+                self.config.on_push_history()
                 points.pop(hit_idx)
                 self.config.on_points_changed()
                 self.update()
 
     def mouseMoveEvent(self, event: QMouseEvent):
         scene_pos = self._screen_to_scene(event.position())
-        normalized = self._scene_to_normalized(scene_pos)
-        self.config.on_cursor_changed(normalized.x, normalized.y)
+        normalized_raw = self._scene_to_normalized(scene_pos)
+        normalized_snapped = self._snap_normalized(normalized_raw)
+        self.config.on_cursor_changed(normalized_raw, normalized_snapped)
 
         points = self.config.points_getter()
 
@@ -191,11 +213,15 @@ class ClipPathCanvas(QWidget):
             self.update()
             return
 
-        if self.dragging_index is None:
+        active_idx = self.dragging_index
+
+        if active_idx is None:
+            active_idx = self.pending_insert_index
+
+        if active_idx is None:
             return
 
-        normalized = self._snap_normalized(normalized)
-        points[self.dragging_index] = normalized
+        points[active_idx] = normalized_snapped
 
         self.config.on_points_changed()
         self.update()
@@ -203,6 +229,11 @@ class ClipPathCanvas(QWidget):
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
             self.dragging_index = None
+            self.pending_insert_index = None
+            self.panning = False
+            return
+
+        if event.button() == Qt.MiddleButton:
             self.panning = False
 
     def wheelEvent(self, event: QWheelEvent):
@@ -245,23 +276,32 @@ class ClipPathCanvas(QWidget):
 
         if active:
             painter.setPen(QPen(QColor("#3a4255"), 1))
-            step_x = guide.width() / max(1, grid_value)
-            step_y = guide.height() / max(1, grid_value)
+            step_nx, step_ny = self._grid_steps_normalized(max(1, grid_value))
+            step_x = guide.width() * step_nx
+            step_y = guide.height() * step_ny
+            screen_rect = self.rect()
+            scene_top_left = self._screen_to_scene(screen_rect.topLeft())
+            scene_bottom_right = self._screen_to_scene(screen_rect.bottomRight())
 
-            for idx in range(1, grid_value):
+            x_start_idx = int((scene_top_left.x() - guide.x()) // step_x) - 1
+            x_end_idx = int((scene_bottom_right.x() - guide.x()) // step_x) + 1
+            y_start_idx = int((scene_top_left.y() - guide.y()) // step_y) - 1
+            y_end_idx = int((scene_bottom_right.y() - guide.y()) // step_y) + 1
+
+            for idx in range(x_start_idx, x_end_idx + 1):
                 x = guide.x() + step_x * idx
-                y = guide.y() + step_y * idx
-
-                sx = self._scene_to_screen(QPointF(x, guide.y())).x()
-                sy = self._scene_to_screen(QPointF(guide.x(), y)).y()
-
+                sx = self._scene_to_screen(QPointF(x, 0)).x()
                 painter.drawLine(
-                    QPointF(sx, guide_screen.top()),
-                    QPointF(sx, guide_screen.bottom()),
+                    QPointF(sx, float(screen_rect.top())),
+                    QPointF(sx, float(screen_rect.bottom())),
                 )
+
+            for idx in range(y_start_idx, y_end_idx + 1):
+                y = guide.y() + step_y * idx
+                sy = self._scene_to_screen(QPointF(0, y)).y()
                 painter.drawLine(
-                    QPointF(guide_screen.left(), sy),
-                    QPointF(guide_screen.right(), sy),
+                    QPointF(float(screen_rect.left()), sy),
+                    QPointF(float(screen_rect.right()), sy),
                 )
 
         points = self.config.points_getter()
@@ -271,6 +311,10 @@ class ClipPathCanvas(QWidget):
         for idx in range(len(points) - 1):
             start = self._scene_to_screen(self._normalized_to_scene(points[idx]))
             end = self._scene_to_screen(self._normalized_to_scene(points[idx + 1]))
+            painter.drawLine(start, end)
+        if len(points) > 2:
+            start = self._scene_to_screen(self._normalized_to_scene(points[-1]))
+            end = self._scene_to_screen(self._normalized_to_scene(points[0]))
             painter.drawLine(start, end)
 
         painter.setPen(QPen(QColor("#f7768e"), 2))
