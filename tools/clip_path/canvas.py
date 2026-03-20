@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Callable
 
@@ -36,6 +37,8 @@ class ClipPathCanvas(QWidget):
         self.pending_insert_index: int | None = None
         self.panning = False
         self.circle_drag_start: ClipPoint | None = None
+        self.circle_drag_current: ClipPoint | None = None
+        self.rotating_circle_index: int | None = None
         self.last_mouse_scene = QPointF(0, 0)
         self.last_mouse_screen = QPointF(0, 0)
 
@@ -71,7 +74,7 @@ class ClipPathCanvas(QWidget):
 
         size_w, size_h, unit = self.config.size_getter()
 
-        if unit == "px" and size_w > 0 and size_h > 0:
+        if size_w > 0 and size_h > 0:
             target_ratio = size_w / size_h
             rect_ratio = rect.width() / rect.height()
 
@@ -160,17 +163,6 @@ class ClipPathCanvas(QWidget):
         step = grid_value / 100.0
         return max(step, 1e-6), max(step, 1e-6)
 
-    def _grid_steps_normalized(self, grid_value: int) -> tuple[float, float]:
-        size_w, size_h, unit = self.config.size_getter()
-
-        if unit == "px":
-            step_x = grid_value / max(size_w, 1.0)
-            step_y = grid_value / max(size_h, 1.0)
-            return max(step_x, 1e-6), max(step_y, 1e-6)
-
-        step = grid_value / 100.0
-        return max(step, 1e-6), max(step, 1e-6)
-
     def _find_hit_point(self, scene_pos: QPointF) -> int | None:
         points = self.config.points_getter()
         nearest_idx = None
@@ -246,6 +238,16 @@ class ClipPathCanvas(QWidget):
         self.config.on_cursor_changed(normalized_raw, normalized_snapped)
 
         points = self.config.points_getter()
+        if self.current_mode() == MODE_CIRCLE and self.circle_drag_start is not None:
+            self.circle_drag_current = normalized_snapped
+            self.update()
+            return
+
+        if self.current_mode() == MODE_CIRCLE and self.rotating_circle_index is not None:
+            self._rotate_circle_snap_points(normalized_snapped)
+            self.config.on_points_changed()
+            self.update()
+            return
 
         if self.panning:
             delta = event.position() - self.last_mouse_screen
@@ -273,6 +275,9 @@ class ClipPathCanvas(QWidget):
                 end = self._snap_normalized(self._scene_to_normalized(self._screen_to_scene(event.position())))
                 self.config.on_circle_created(self.circle_drag_start, end)
                 self.circle_drag_start = None
+                self.circle_drag_current = None
+            if self.rotating_circle_index is not None:
+                self.rotating_circle_index = None
             self.dragging_index = None
             self.pending_insert_index = None
             self.panning = False
@@ -380,13 +385,35 @@ class ClipPathCanvas(QWidget):
                 snap_screen = self._scene_to_screen(self._normalized_to_scene(snap))
                 painter.drawEllipse(snap_screen, 3, 3)
 
+        if self.current_mode() == MODE_CIRCLE and self.circle_drag_start and self.circle_drag_current:
+            center = ClipPoint(
+                (self.circle_drag_start.x + self.circle_drag_current.x) / 2.0,
+                (self.circle_drag_start.y + self.circle_drag_current.y) / 2.0,
+            )
+            radius = (((self.circle_drag_current.x - self.circle_drag_start.x) ** 2 + (self.circle_drag_current.y - self.circle_drag_start.y) ** 2) ** 0.5) / 2.0
+            painter.setPen(QPen(QColor("#e0af68"), 1))
+            center_screen = self._scene_to_screen(self._normalized_to_scene(center))
+            guide = self._guide_rect_scene()
+            painter.drawEllipse(center_screen, radius * guide.width() * self.zoom, radius * guide.height() * self.zoom)
+
         mode_color = "#9ece6a" if self.current_mode() == MODE_INPUT else "#e0af68"
         painter.setPen(QPen(QColor(mode_color), 1))
         painter.drawText(10, 20, f"Mode: {self.current_mode()}  Zoom: {self.zoom:.2f}")
 
     def _handle_circle_press(self, event: QMouseEvent, scene_pos: QPointF):
         if event.button() == Qt.LeftButton:
-            self.circle_drag_start = self._snap_normalized(self._scene_to_normalized(scene_pos))
+            pointer = self._snap_normalized(self._scene_to_normalized(scene_pos))
+            circles = self.config.circles_getter()
+            for idx, circle in enumerate(circles):
+                for snap in circle.snap_points:
+                    dx = snap.x - pointer.x
+                    dy = snap.y - pointer.y
+                    if (dx * dx + dy * dy) ** 0.5 <= 0.03:
+                        self.config.on_push_history()
+                        self.rotating_circle_index = idx
+                        return
+            self.circle_drag_start = pointer
+            self.circle_drag_current = pointer
             return
 
         if event.button() != Qt.RightButton:
@@ -404,3 +431,20 @@ class ClipPathCanvas(QWidget):
                 self.config.on_points_changed()
                 self.update()
                 return
+
+    def _rotate_circle_snap_points(self, pointer: ClipPoint):
+        if self.rotating_circle_index is None:
+            return
+        circles = self.config.circles_getter()
+        if not (0 <= self.rotating_circle_index < len(circles)):
+            return
+        circle = circles[self.rotating_circle_index]
+        angle0 = math.atan2(pointer.y - circle.center.y, pointer.x - circle.center.x)
+        step = (2 * math.pi) / max(1, circle.divisions)
+        circle.snap_points = [
+            ClipPoint(
+                circle.center.x + math.cos(angle0 + step * idx) * circle.radius,
+                circle.center.y + math.sin(angle0 + step * idx) * circle.radius,
+            )
+            for idx in range(circle.divisions)
+        ]

@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.flow_layout import FlowLayout
 from .canvas import CanvasConfig, ClipPathCanvas
 from .state import MODE_CIRCLE, MODE_INPUT, MODE_VIEW, SIZE_TYPE_PERCENT, CircleGuide, ClipPoint
 
@@ -63,9 +64,7 @@ class ClipPathWindow(QMainWindow):
         root_layout.setSpacing(6)
 
         toolbar = QWidget()
-        toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(8)
+        toolbar_layout = FlowLayout(toolbar, margin=0, spacing=6)
 
         border_color = self.palette().color(QPalette.Mid).name()
         toolbar.setStyleSheet(
@@ -86,6 +85,7 @@ class ClipPathWindow(QMainWindow):
         self.mode_circle = QPushButton("円")
         for btn in (self.mode_input, self.mode_screen, self.mode_circle):
             btn.setCheckable(True)
+            btn.setStyleSheet("padding: 1px 4px;")
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
         for btn in (self.mode_input, self.mode_screen, self.mode_circle):
@@ -109,6 +109,8 @@ class ClipPathWindow(QMainWindow):
         self.unit_percent = QPushButton("%")
         self.unit_px.setCheckable(True)
         self.unit_percent.setCheckable(True)
+        self.unit_px.setStyleSheet("padding: 1px 4px;")
+        self.unit_percent.setStyleSheet("padding: 1px 4px;")
         self.unit_group = QButtonGroup(self)
         self.unit_group.setExclusive(True)
         self.unit_group.addButton(self.unit_px)
@@ -135,6 +137,8 @@ class ClipPathWindow(QMainWindow):
         self.grid_off = QPushButton("OFF")
         self.grid_on.setCheckable(True)
         self.grid_off.setCheckable(True)
+        self.grid_on.setStyleSheet("padding: 1px 4px;")
+        self.grid_off.setStyleSheet("padding: 1px 4px;")
         self.grid_group = QButtonGroup(self)
         self.grid_group.setExclusive(True)
         self.grid_group.addButton(self.grid_on)
@@ -147,9 +151,7 @@ class ClipPathWindow(QMainWindow):
         grid_layout.addWidget(self.grid_off)
 
         toolbar_layout.addWidget(mode_box)
-        toolbar_layout.addStretch()
         toolbar_layout.addWidget(size_box)
-        toolbar_layout.addStretch()
         toolbar_layout.addWidget(grid_box)
         root_layout.addWidget(toolbar)
 
@@ -179,6 +181,7 @@ class ClipPathWindow(QMainWindow):
 
         self.point_table = QTableWidget(0, 3)
         self.point_table.setHorizontalHeaderLabels(["#", "X", "Y"])
+        self.point_table.verticalHeader().setVisible(False)
         self.point_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.point_table.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)
         self.point_table.setColumnWidth(0, 44)
@@ -199,15 +202,16 @@ class ClipPathWindow(QMainWindow):
         footer = QHBoxLayout()
         self.cursor_label = QLabel("Cursor: x=0.00%, y=0.00%")
         footer.addWidget(self.cursor_label)
-        footer.addStretch()
 
         self.code_area = QScrollArea()
+        self.code_area.setFrameShape(QScrollArea.NoFrame)
         self.code_area.setWidgetResizable(False)
         self.code_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.code_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.code_area.setFixedHeight(30)
         self.code_label = QLabel("clip-path: polygon();")
         self.code_label.setWordWrap(False)
+        self.code_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.code_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.code_label.setStyleSheet("padding: 4px;")
         self.code_label.adjustSize()
@@ -215,7 +219,7 @@ class ClipPathWindow(QMainWindow):
         self.code_area.mousePressEvent = self._on_code_clicked
         self.code_label.mousePressEvent = self._on_code_clicked
         self.code_area.wheelEvent = self._on_code_wheel
-        footer.addWidget(self.code_area)
+        footer.addWidget(self.code_area, 1)
         root_layout.addLayout(footer)
 
         self.setCentralWidget(body)
@@ -392,6 +396,17 @@ class ClipPathWindow(QMainWindow):
         self.history_path.write_text(json.dumps(entries[: self.MAX_HISTORY], ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _on_code_clicked(self, _event):
+        if len(self.points) <= 2:
+            self.code_label.setStyleSheet("padding: 4px; color: #f7768e;")
+            self.code_label.setText("3つ以上の点を配置してください")
+
+            def _restore_error():
+                self.code_label.setStyleSheet("padding: 4px;")
+                self.code_label.setText(self.copy_feedback_base_text)
+
+            QTimer.singleShot(900, _restore_error)
+            return
+
         code = self._build_code()
         QApplication.clipboard().setText(code)
         self._save_history_entry(code)
@@ -435,9 +450,10 @@ class ClipPathWindow(QMainWindow):
         divisions, ok = QInputDialog.getInt(self, "円の分割", "分割数", 8, 3, 360, 1)
         if not ok:
             return
+        start_angle = math.atan2(start.y - cy, start.x - cx)
         snaps: list[ClipPoint] = []
         for i in range(divisions):
-            ang = (2 * math.pi * i) / divisions
+            ang = start_angle + (2 * math.pi * i) / divisions
             snaps.append(ClipPoint(cx + math.cos(ang) * radius, cy + math.sin(ang) * radius))
         self.circles.append(CircleGuide(center=ClipPoint(cx, cy), radius=radius, divisions=divisions, snap_points=snaps))
         self._refresh_views()
