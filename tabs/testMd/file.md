@@ -1,37 +1,13 @@
-# 追加予定 #
-## core ##
-    - タブを外にドラッグして別Windowにする。
-    - 終了時に開いてたタブを再起動時に選択
-    - 閉じたタブの復元
-    - 各Tabにヘルプ元
+_build_uiを修正しました。
+それに伴ったリファクタを行ってください。
+①mode、size（valueとtype）、grid（valueとactive）を保持して、toolbarで切り替え
+②pointsは内部では正規化して保持する。
+	- 起動時、Canvasいっぱいから少し余白を取って補助線を引く
+	- sizeのtypeがpxの場合は、hとwの比率に合わせて補助線を調整する
+	- 補助線内を0~1として正規化、補助線外でも1以上の値を保持する。
+③pointsの画面出力時はsizeに応じてpxか%に計算して出力する。
+④gridがactiveのときはCanvas上にgridを表示し、入力時にはスナップさせる。
+⑤pointの入力や削除はmodeが"入力"のときのみにする。
+⑥Ctrlを押している間はmodeを"画面"に切り替える（放すと"入力"に戻る）
+⑦"画面"モードでのスクロールで拡大縮小、マウスドラッグで移動を行う。
 
-    - ToolsのPlugin化（設定保存用）
-    - color調整
-
-## markdown ##
-	- editor
-		- ショートカット改善
-    - import時にTabのリネーム（重複時index）
-    - ドラッグでimport
-    - export時にTab名をファイル名にする。
-    - 外のファイルと同期（？）するモード
-    - インデントに背景色。
-    - option
-        - color
-        - shortcut
-
-## clamp ##
-    - reverseの精度
-    - preview
-    - option
-        - 少数点以下の桁
-        - 文字サイズ（ctrlスクロール対応）
-        - color
-
-
-# 新規Tool案 #
-    - クリップボード
-    - カラーピック
-    - ギター指盤コード逆引き
-    - Clip-path Polygon Editor
-    
