@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QPlainTextEdit
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextCursor,QPainter, QPen, QColor,QFont
+from PySide6.QtGui import QTextCursor, QPainter, QPen, QColor, QFont, QTextCharFormat
 from .highlighter import MarkdownHighlighter
 import re
 
@@ -41,7 +41,18 @@ class MarkdownEditor(QPlainTextEdit):
         else:
             super().wheelEvent(event)
 
+    def _reset_current_char_format(self):
+        self.setCurrentCharFormat(QTextCharFormat())
+
     def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Down:
+            cursor = self.textCursor()
+            block = cursor.block()
+            if block.isValid() and not block.next().isValid():
+                cursor.movePosition(QTextCursor.EndOfBlock)
+                self.setTextCursor(cursor)
+                return
+
         if event.text() == "`":
 
             cursor = self.textCursor()
@@ -60,7 +71,10 @@ class MarkdownEditor(QPlainTextEdit):
                 self.setTextCursor(cursor)
 
                 return
+
         text = event.text()
+        if text and not (event.modifiers() & Qt.ControlModifier):
+            self._reset_current_char_format()
 
         if (event.modifiers() & Qt.ControlModifier) and (event.modifiers() & Qt.ShiftModifier):
 
@@ -144,6 +158,11 @@ class MarkdownEditor(QPlainTextEdit):
             return
 
         super().keyPressEvent(event)
+
+    def inputMethodEvent(self, event):
+        if event.preeditString() or event.commitString():
+            self._reset_current_char_format()
+        super().inputMethodEvent(event)
         
     def indent_selection(self):
 
