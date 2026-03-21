@@ -4,8 +4,8 @@ import json
 import math
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSize, QTimer, Qt
-from PySide6.QtGui import QColor, QFontMetrics, QKeyEvent, QPainter, QPalette, QPen, QPixmap, QTextLayout, QWheelEvent
+from PySide6.QtCore import QPoint, QSize, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QCursor, QFontMetrics, QKeyEvent, QMouseEvent, QPainter, QPalette, QPen, QPixmap, QTextLayout, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -48,6 +49,79 @@ class CodeLineEdit(QLineEdit):
 
     def wheelEvent(self, event: QWheelEvent):
         self._wheel_handler(event)
+
+    def enterEvent(self, event):
+        if self.toolTip():
+            QToolTip.showText(self.mapToGlobal(self.rect().bottomLeft()), self.toolTip(), self)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        QToolTip.hideText()
+        super().leaveEvent(event)
+
+
+class SelectAllLineEdit(QLineEdit):
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton:
+            if not self.hasFocus():
+                self.setFocus(Qt.MouseFocusReason)
+            QTimer.singleShot(0, self.selectAll)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        QTimer.singleShot(0, self.selectAll)
+
+
+class PointTableWidget(QTableWidget):
+    rowReordered = Signal(int, int)
+    indexMenuRequested = Signal(int, QPoint)
+
+    def __init__(self, rows: int, columns: int, parent: QWidget | None = None):
+        super().__init__(rows, columns, parent)
+        self._drag_row: int | None = None
+        self._drag_active = False
+        self._press_pos: QPoint | None = None
+
+    def mousePressEvent(self, event: QMouseEvent):
+        item = self.itemAt(event.position().toPoint())
+        if item and item.column() == 0:
+            self._drag_row = item.row()
+            self._press_pos = event.position().toPoint()
+            self._drag_active = event.button() == Qt.LeftButton
+            if event.button() == Qt.RightButton:
+                self.indexMenuRequested.emit(item.row(), self.viewport().mapToGlobal(event.position().toPoint()))
+                event.accept()
+                return
+        else:
+            self._drag_row = None
+            self._drag_active = False
+            self._press_pos = None
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if (
+            self._drag_active
+            and self._drag_row is not None
+            and self._press_pos is not None
+            and (event.position().toPoint() - self._press_pos).manhattanLength() >= QApplication.startDragDistance()
+        ):
+            self.viewport().setCursor(QCursor(Qt.ClosedHandCursor))
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._drag_active and self._drag_row is not None and event.button() == Qt.LeftButton:
+            target_item = self.itemAt(event.position().toPoint())
+            target_row = target_item.row() if target_item else self.rowAt(event.position().toPoint().y())
+            if target_row >= 0 and target_row != self._drag_row:
+                self.rowReordered.emit(self._drag_row, target_row)
+        self.viewport().unsetCursor()
+        self._drag_row = None
+        self._drag_active = False
+        self._press_pos = None
+        super().mouseReleaseEvent(event)
 
 
 class HistoryPreviewWidget(QWidget):
@@ -132,6 +206,7 @@ class ClipPathWindow(QMainWindow):
         self._code_scroll_offset = 0
         self._history_dialog_width = self.DEFAULT_HISTORY_DIALOG_WIDTH
         self._history_dialog_height = self.DEFAULT_HISTORY_DIALOG_HEIGHT
+        self._code_tooltip_text = "Click to copy and save to history.\nScroll to view horizontally."
 
         self._build_ui()
         self._connect_ui()
@@ -274,6 +349,7 @@ class ClipPathWindow(QMainWindow):
                 circles_getter=lambda: self.circles,
                 snap_points_getter=self._get_snap_points,
                 on_points_changed=self._refresh_views,
+                on_point_targeted=self._focus_point_x_editor,
                 on_cursor_changed=self._on_cursor_changed,
                 on_push_history=self._push_undo_state,
                 on_circle_created=self._on_circle_created,
@@ -286,7 +362,7 @@ class ClipPathWindow(QMainWindow):
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.point_table = QTableWidget(0, 3)
+        self.point_table = PointTableWidget(0, 3)
         self.point_table.setHorizontalHeaderLabels(["#", "X", "Y"])
         self.point_table.verticalHeader().setVisible(False)
         self.point_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -328,6 +404,7 @@ class ClipPathWindow(QMainWindow):
         self.code_label.setText(self._code_full_text)
         self.code_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.code_label.setStyleSheet("padding: 0px 4px; background: transparent; border: none;")
+        self.code_label.setToolTip(self._code_tooltip_text)
         footer.addWidget(self.code_label, 1)
         root_layout.addLayout(footer)
 
@@ -344,6 +421,8 @@ class ClipPathWindow(QMainWindow):
         self.grid_check.toggled.connect(self._on_grid_changed)
         self.reset_button.clicked.connect(self._reset_state)
         self.show_history_button.clicked.connect(self._show_history_dialog)
+        self.point_table.rowReordered.connect(self._reorder_points)
+        self.point_table.indexMenuRequested.connect(self._show_point_index_menu)
 
     def _serialize_points(self, points: list[ClipPoint]) -> list[dict]:
         return [{"x": point.x, "y": point.y} for point in points]
@@ -526,8 +605,8 @@ class ClipPathWindow(QMainWindow):
             self.point_table.setItem(row, 0, idx_item)
 
             x_text, y_text = self._to_table_output(point)
-            x_edit = QLineEdit(x_text)
-            y_edit = QLineEdit(y_text)
+            x_edit = SelectAllLineEdit(x_text)
+            y_edit = SelectAllLineEdit(y_text)
             x_edit.editingFinished.connect(lambda r=row: self._on_row_edit_finished(r))
             y_edit.editingFinished.connect(lambda r=row: self._on_row_edit_finished(r))
             self.point_table.setCellWidget(row, 1, x_edit)
@@ -628,6 +707,58 @@ class ClipPathWindow(QMainWindow):
         self._code_scroll_offset = max(0, min(max_offset, self._code_scroll_offset + (direction * step)))
         self._update_code_label_layout()
         event.accept()
+
+    def _focus_point_x_editor(self, row: int):
+        if not (0 <= row < len(self.points)):
+            return
+        x_edit = self.point_table.cellWidget(row, 1)
+        if not isinstance(x_edit, QLineEdit):
+            return
+        self.point_table.setCurrentCell(row, 1)
+        self.point_table.scrollToItem(self.point_table.item(row, 0), QAbstractItemView.PositionAtCenter)
+        x_edit.setFocus(Qt.OtherFocusReason)
+        x_edit.selectAll()
+
+    def _reorder_points(self, source_row: int, target_row: int):
+        if not (0 <= source_row < len(self.points) and 0 <= target_row < len(self.points)):
+            return
+        self._push_undo_state()
+        point = self.points.pop(source_row)
+        self.points.insert(target_row, point)
+        self._refresh_views()
+        self.canvas.update()
+        self._focus_point_x_editor(target_row)
+
+    def _insert_point(self, index: int):
+        insert_at = max(0, min(index, len(self.points)))
+        self._push_undo_state()
+        self.points.insert(insert_at, ClipPoint(0.0, 0.0))
+        self._refresh_views()
+        self.canvas.update()
+        self._focus_point_x_editor(insert_at)
+
+    def _remove_point(self, row: int):
+        if not (0 <= row < len(self.points)):
+            return
+        self._push_undo_state()
+        self.points.pop(row)
+        self._refresh_views()
+        self.canvas.update()
+
+    def _show_point_index_menu(self, row: int, global_pos: QPoint):
+        if not (0 <= row < len(self.points)):
+            return
+        menu = QMenu(self.point_table)
+        insert_before_action = menu.addAction("前に挿入")
+        insert_after_action = menu.addAction("後ろに挿入")
+        remove_action = menu.addAction("この点を削除")
+        action = menu.exec(global_pos)
+        if action == insert_before_action:
+            self._insert_point(row)
+        elif action == insert_after_action:
+            self._insert_point(row + 1)
+        elif action == remove_action:
+            self._remove_point(row)
 
     def _clone_points(self) -> list[ClipPoint]:
         return [ClipPoint(p.x, p.y) for p in self.points]

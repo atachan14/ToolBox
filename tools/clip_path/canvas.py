@@ -20,6 +20,7 @@ class CanvasConfig:
     circles_getter: Callable[[], list[CircleGuide]]
     snap_points_getter: Callable[[], list[ClipPoint]]
     on_points_changed: Callable[[], None]
+    on_point_targeted: Callable[[int], None]
     on_cursor_changed: Callable[[ClipPoint, ClipPoint], None]
     on_push_history: Callable[[], None]
     on_circle_created: Callable[[ClipPoint, ClipPoint], None]
@@ -212,6 +213,7 @@ class ClipPathCanvas(QWidget):
             hit_idx = self._find_hit_point(scene_pos)
 
             if hit_idx is not None:
+                self.config.on_point_targeted(hit_idx)
                 self.config.on_push_history()
                 self.dragging_index = hit_idx
                 return
