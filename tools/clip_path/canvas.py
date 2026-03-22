@@ -5,15 +5,17 @@ from dataclasses import dataclass
 from typing import Callable
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPainterPath, QPen, QPolygonF, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
-from .state import MODE_CIRCLE, MODE_INPUT, MODE_VIEW, CircleGuide, ClipPoint
+from .state import MODE_CIRCLE, CircleGuide, ClipPoint
 
 
 @dataclass
 class CanvasConfig:
-    mode_getter: Callable[[], str]
+    circle_tool_active_getter: Callable[[], bool]
+    ctrl_pressed_getter: Callable[[], bool]
+    guide_visible_getter: Callable[[], bool]
     points_getter: Callable[[], list[ClipPoint]]
     size_getter: Callable[[], tuple[float, float, str]]
     grid_getter: Callable[[], tuple[bool, int]]
@@ -47,8 +49,6 @@ class ClipPathCanvas(QWidget):
         self.zoom = 1.0
         self.pan = QPointF(0, 0)
 
-        self.temp_mode: str | None = None
-
         self.hit_radius = 8
         self.margin = 24
 
@@ -56,12 +56,14 @@ class ClipPathCanvas(QWidget):
         self.setMinimumSize(0, 0)
         self.setFocusPolicy(Qt.StrongFocus)
 
-    def set_temp_mode(self, mode: str | None):
-        self.temp_mode = mode
-        self.update()
-
     def current_mode(self) -> str:
-        return self.temp_mode or self.config.mode_getter()
+        return MODE_CIRCLE if self.config.circle_tool_active_getter() else "input"
+
+    def _is_pan_modifier_active(self) -> bool:
+        return self.config.ctrl_pressed_getter()
+
+    def _is_guide_visible(self) -> bool:
+        return self.config.guide_visible_getter()
 
     def _guide_rect_scene(self) -> QRectF:
         width = max(1.0, float(self.width()))
@@ -129,7 +131,9 @@ class ClipPathCanvas(QWidget):
                 round(point.y / step_y) * step_y,
             )
 
-        return self._snap_to_snap_points(snapped)
+        if active:
+            return self._snap_to_snap_points(snapped)
+        return snapped
 
     def _snap_to_snap_points(self, point: ClipPoint) -> ClipPoint:
         snap_points = self.config.snap_points_getter()
@@ -192,10 +196,10 @@ class ClipPathCanvas(QWidget):
         self.last_mouse_scene = scene_pos
         self.last_mouse_screen = event.position()
 
-        mode = self.current_mode()
+        circle_tool_active = self.config.circle_tool_active_getter()
         points = self.config.points_getter()
 
-        if mode == MODE_VIEW and event.button() == Qt.LeftButton:
+        if self._is_pan_modifier_active() and event.button() == Qt.LeftButton:
             self.panning = True
             return
 
@@ -204,9 +208,8 @@ class ClipPathCanvas(QWidget):
             self.panning = True
             return
 
-        if mode != MODE_INPUT:
-            if mode == MODE_CIRCLE:
-                self._handle_circle_press(event, scene_pos)
+        if circle_tool_active:
+            self._handle_circle_press(event, scene_pos)
             return
 
         if event.button() == Qt.LeftButton:
@@ -242,12 +245,12 @@ class ClipPathCanvas(QWidget):
         self.config.on_cursor_changed(normalized_raw, normalized_snapped)
 
         points = self.config.points_getter()
-        if self.current_mode() == MODE_CIRCLE and self.circle_drag_start is not None:
+        if self.config.circle_tool_active_getter() and self.circle_drag_start is not None:
             self.circle_drag_current = normalized_snapped
             self.update()
             return
 
-        if self.current_mode() == MODE_CIRCLE and self.rotating_circle_index is not None:
+        if self.config.circle_tool_active_getter() and self.rotating_circle_index is not None:
             self._rotate_circle_snap_points(normalized_snapped)
             self.config.on_points_changed()
             self.update()
@@ -275,7 +278,7 @@ class ClipPathCanvas(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
-            if self.current_mode() == MODE_CIRCLE and self.circle_drag_start is not None:
+            if self.config.circle_tool_active_getter() and self.circle_drag_start is not None:
                 end = self._snap_normalized(self._scene_to_normalized(self._screen_to_scene(event.position())))
                 self.config.on_circle_created(self.circle_drag_start, end)
                 self.circle_drag_start = None
@@ -293,7 +296,7 @@ class ClipPathCanvas(QWidget):
             self.panning = False
 
     def wheelEvent(self, event: QWheelEvent):
-        if self.current_mode() != MODE_VIEW:
+        if not self._is_pan_modifier_active():
             return
 
         delta = event.angleDelta().y()
@@ -320,15 +323,18 @@ class ClipPathCanvas(QWidget):
         painter.fillRect(self.rect(), QColor("#20252e"))
 
         guide = self._guide_rect_scene()
+        points = self.config.points_getter()
+        circles = self.config.circles_getter()
+        guide_visible = self._is_guide_visible()
+        active, grid_value = self.config.grid_getter()
 
         guide_tl = self._scene_to_screen(guide.topLeft())
         guide_br = self._scene_to_screen(guide.bottomRight())
         guide_screen = QRectF(guide_tl, guide_br).normalized()
 
-        painter.setPen(QPen(QColor("#69738a"), 1))
-        painter.drawRect(guide_screen)
-
-        active, grid_value = self.config.grid_getter()
+        if guide_visible:
+            painter.setPen(QPen(QColor("#69738a"), 1))
+            painter.drawRect(guide_screen)
 
         if active:
             painter.setPen(QPen(QColor("#3a4255"), 1))
@@ -360,38 +366,49 @@ class ClipPathCanvas(QWidget):
                     QPointF(float(screen_rect.right()), sy),
                 )
 
-        points = self.config.points_getter()
-        circles = self.config.circles_getter()
+        if not guide_visible and len(points) >= 3:
+            polygon = QPolygonF([self._scene_to_screen(self._normalized_to_scene(point)) for point in points])
+            fill_path = QPainterPath()
+            fill_path.addPolygon(polygon)
+            clip_path = QPainterPath()
+            clip_path.addRect(guide_screen)
+            painter.save()
+            painter.setClipPath(clip_path)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(122, 162, 247, 70))
+            painter.drawPath(fill_path)
+            painter.restore()
 
-        painter.setPen(QPen(QColor("#7aa2f7"), 2))
+        if guide_visible:
+            painter.setPen(QPen(QColor("#7aa2f7"), 2))
 
-        for idx in range(len(points) - 1):
-            start = self._scene_to_screen(self._normalized_to_scene(points[idx]))
-            end = self._scene_to_screen(self._normalized_to_scene(points[idx + 1]))
-            painter.drawLine(start, end)
-        if len(points) > 2:
-            start = self._scene_to_screen(self._normalized_to_scene(points[-1]))
-            end = self._scene_to_screen(self._normalized_to_scene(points[0]))
-            painter.drawLine(start, end)
+            for idx in range(len(points) - 1):
+                start = self._scene_to_screen(self._normalized_to_scene(points[idx]))
+                end = self._scene_to_screen(self._normalized_to_scene(points[idx + 1]))
+                painter.drawLine(start, end)
+            if len(points) > 2:
+                start = self._scene_to_screen(self._normalized_to_scene(points[-1]))
+                end = self._scene_to_screen(self._normalized_to_scene(points[0]))
+                painter.drawLine(start, end)
 
-        painter.setPen(QPen(QColor("#f7768e"), 2))
+            painter.setPen(QPen(QColor("#f7768e"), 2))
 
-        for point in points:
-            screen = self._scene_to_screen(self._normalized_to_scene(point))
-            painter.drawEllipse(screen, 4, 4)
+            for point in points:
+                screen = self._scene_to_screen(self._normalized_to_scene(point))
+                painter.drawEllipse(screen, 4, 4)
 
-        painter.setPen(QPen(QColor("#9ece6a"), 1))
-        for circle in circles:
-            center = self._scene_to_screen(self._normalized_to_scene(circle.center))
-            guide = self._guide_rect_scene()
-            rx = circle.radius * guide.width() * self.zoom
-            ry = circle.radius * guide.height() * self.zoom
-            painter.drawEllipse(center, rx, ry)
-            for snap in circle.snap_points:
-                snap_screen = self._scene_to_screen(self._normalized_to_scene(snap))
-                painter.drawEllipse(snap_screen, 3, 3)
+            painter.setPen(QPen(QColor("#9ece6a"), 1))
+            for circle in circles:
+                center = self._scene_to_screen(self._normalized_to_scene(circle.center))
+                guide = self._guide_rect_scene()
+                rx = circle.radius * guide.width() * self.zoom
+                ry = circle.radius * guide.height() * self.zoom
+                painter.drawEllipse(center, rx, ry)
+                for snap in circle.snap_points:
+                    snap_screen = self._scene_to_screen(self._normalized_to_scene(snap))
+                    painter.drawEllipse(snap_screen, 3, 3)
 
-        if self.current_mode() == MODE_CIRCLE and self.circle_drag_start and self.circle_drag_current:
+        if guide_visible and self.config.circle_tool_active_getter() and self.circle_drag_start and self.circle_drag_current:
             center = ClipPoint(
                 (self.circle_drag_start.x + self.circle_drag_current.x) / 2.0,
                 (self.circle_drag_start.y + self.circle_drag_current.y) / 2.0,
@@ -402,9 +419,10 @@ class ClipPathCanvas(QWidget):
             guide = self._guide_rect_scene()
             painter.drawEllipse(center_screen, radius * guide.width() * self.zoom, radius * guide.height() * self.zoom)
 
-        mode_color = "#9ece6a" if self.current_mode() == MODE_INPUT else "#e0af68"
+        mode_color = "#e0af68" if self.config.circle_tool_active_getter() else "#9ece6a"
         painter.setPen(QPen(QColor(mode_color), 1))
-        painter.drawText(10, 20, f"Mode: {self.current_mode()}  Zoom: {self.zoom:.2f}")
+        mode_text = "circle" if self.config.circle_tool_active_getter() else "input"
+        painter.drawText(10, 20, f"Mode: {mode_text}  Zoom: {self.zoom:.2f}")
 
     def _handle_circle_press(self, event: QMouseEvent, scene_pos: QPointF):
         if event.button() == Qt.LeftButton:

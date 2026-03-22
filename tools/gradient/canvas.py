@@ -44,7 +44,7 @@ class GradientCanvas(QWidget):
         self._pending_background_click = False
         self._stop_hit_radius = 8.0
         self.setMouseTracking(True)
-        self.setMinimumHeight(280)
+        self.setMinimumHeight(10)
 
     def _guide_rect_scene(self) -> QRectF:
         width = max(1.0, float(self.width()))

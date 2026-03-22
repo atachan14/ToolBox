@@ -78,12 +78,15 @@ class SelectAllLineEdit(QLineEdit):
 class PointTableWidget(QTableWidget):
     rowReordered = Signal(int, int)
     indexMenuRequested = Signal(int, QPoint)
+    dragPreviewChanged = Signal(int, int)
+    dragStateChanged = Signal(bool)
 
     def __init__(self, rows: int, columns: int, parent: QWidget | None = None):
         super().__init__(rows, columns, parent)
         self._drag_row: int | None = None
         self._drag_active = False
         self._press_pos: QPoint | None = None
+        self._preview_row = -1
 
     def mousePressEvent(self, event: QMouseEvent):
         item = self.itemAt(event.position().toPoint())
@@ -108,7 +111,13 @@ class PointTableWidget(QTableWidget):
             and self._press_pos is not None
             and (event.position().toPoint() - self._press_pos).manhattanLength() >= QApplication.startDragDistance()
         ):
+            self.dragStateChanged.emit(True)
             self.viewport().setCursor(QCursor(Qt.ClosedHandCursor))
+            target_item = self.itemAt(event.position().toPoint())
+            target_row = target_item.row() if target_item else self.rowAt(event.position().toPoint().y())
+            if target_row != self._preview_row:
+                self._preview_row = target_row
+                self.dragPreviewChanged.emit(self._drag_row, self._preview_row)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
@@ -121,6 +130,9 @@ class PointTableWidget(QTableWidget):
         self._drag_row = None
         self._drag_active = False
         self._press_pos = None
+        self._preview_row = -1
+        self.dragPreviewChanged.emit(-1, -1)
+        self.dragStateChanged.emit(False)
         super().mouseReleaseEvent(event)
 
 
@@ -207,6 +219,8 @@ class ClipPathWindow(QMainWindow):
         self._history_dialog_width = self.DEFAULT_HISTORY_DIALOG_WIDTH
         self._history_dialog_height = self.DEFAULT_HISTORY_DIALOG_HEIGHT
         self._code_tooltip_text = "Click to copy and save to history.\nScroll to view horizontally."
+        self._drag_source_row = -1
+        self._drag_target_row = -1
 
         self._build_ui()
         self._connect_ui()
@@ -254,7 +268,7 @@ class ClipPathWindow(QMainWindow):
         border_color = self.palette().color(QPalette.Mid).name()
         toolbar.setStyleSheet(
             f"""
-            #mode_box, #size_box, #grid_box {{
+            #size_box, #grid_box, #guide_box {{
                 border: 1px solid {border_color};
                 border-radius: 6px;
             }}
@@ -280,6 +294,7 @@ class ClipPathWindow(QMainWindow):
             mode_layout.addWidget(btn)
         self.mode_input.setChecked(True)
         self.last_mode_button = self.mode_input
+        mode_box.hide()
 
         size_box = QWidget()
         size_box.setObjectName("size_box")
@@ -332,17 +347,36 @@ class ClipPathWindow(QMainWindow):
         grid_layout.addWidget(self.grid_input)
         grid_layout.addWidget(self.grid_check)
 
+        guide_box = QWidget()
+        guide_box.setObjectName("guide_box")
+        guide_layout = QHBoxLayout(guide_box)
+        guide_layout.setContentsMargins(4, 2, 4, 2)
+        guide_layout.setSpacing(2)
+        self.guide_check = QCheckBox()
+        self.guide_check.setFixedHeight(self._toolbar_button_height)
+        self.guide_check.setChecked(True)
+        guide_layout.addWidget(QLabel("Guide:"))
+        guide_layout.addWidget(self.guide_check)
+
         toolbar_layout.addWidget(mode_box)
         toolbar_layout.addWidget(size_box)
         toolbar_layout.addWidget(grid_box)
+        toolbar_layout.addWidget(guide_box)
         root_layout.addWidget(toolbar)
 
         splitter = QSplitter(Qt.Horizontal)
         root_layout.addWidget(splitter, 1)
 
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(4)
+
         self.canvas = ClipPathCanvas(
             CanvasConfig(
-                mode_getter=self._effective_mode,
+                circle_tool_active_getter=lambda: self.circle_tool_button.isChecked(),
+                ctrl_pressed_getter=lambda: self.ctrl_pressed,
+                guide_visible_getter=lambda: self.guide_check.isChecked(),
                 points_getter=lambda: self.points,
                 size_getter=self._get_size,
                 grid_getter=self._get_grid,
@@ -356,7 +390,40 @@ class ClipPathWindow(QMainWindow):
                 on_circle_removed=self._on_circle_removed,
             )
         )
-        splitter.addWidget(self.canvas)
+        left_layout.addWidget(self.canvas, 1)
+        circle_button_bg = self.palette().color(QPalette.Button).name()
+        circle_button_fg = self.palette().color(QPalette.ButtonText).name()
+        circle_button_active_bg = self.palette().color(QPalette.Highlight).name()
+        circle_button_active_fg = self.palette().color(QPalette.HighlightedText).name()
+        self.toolbox_toggle_button = QPushButton("ToolBox")
+        self.toolbox_toggle_button.setCheckable(True)
+        self.toolbox_toggle_button.setChecked(True)
+        self.toolbox_toggle_button.setFixedHeight(self._toolbar_button_height)
+        self.toolbox_panel = QWidget()
+        toolbox_layout = QHBoxLayout(self.toolbox_panel)
+        toolbox_layout.setContentsMargins(6, 6, 6, 6)
+        toolbox_layout.setSpacing(6)
+        self.circle_tool_button = QPushButton("円")
+        self.circle_tool_button.setCheckable(True)
+        self.circle_tool_button.setFixedHeight(28)
+        self.circle_tool_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                padding: 0px 10px;
+                background: {circle_button_bg};
+                color: {circle_button_fg};
+            }}
+            QPushButton:checked {{
+                background: {circle_button_active_bg};
+                color: {circle_button_active_fg};
+            }}
+            """
+        )
+        toolbox_layout.addWidget(self.circle_tool_button)
+        toolbox_layout.addStretch(1)
+        left_layout.addWidget(self.toolbox_toggle_button)
+        left_layout.addWidget(self.toolbox_panel)
+        splitter.addWidget(left)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -425,11 +492,16 @@ class ClipPathWindow(QMainWindow):
         self.unit_percent.clicked.connect(self._on_size_changed)
         self.grid_input.valueChanged.connect(self._on_grid_changed)
         self.grid_check.toggled.connect(self._on_grid_changed)
+        self.guide_check.toggled.connect(self._on_guide_changed)
         self.reset_button.clicked.connect(self._reset_state)
         self.save_history_button.clicked.connect(self._save_current_to_history)
         self.show_history_button.clicked.connect(self._show_history_dialog)
         self.point_table.rowReordered.connect(self._reorder_points)
         self.point_table.indexMenuRequested.connect(self._show_point_index_menu)
+        self.point_table.dragPreviewChanged.connect(self._on_table_drag_preview_changed)
+        self.point_table.dragStateChanged.connect(self._on_table_drag_state_changed)
+        self.circle_tool_button.toggled.connect(self._on_circle_tool_toggled)
+        self.toolbox_toggle_button.toggled.connect(self._on_toolbox_toggled)
 
     def _serialize_points(self, points: list[ClipPoint]) -> list[dict]:
         return [{"x": point.x, "y": point.y} for point in points]
@@ -492,6 +564,7 @@ class ClipPathWindow(QMainWindow):
             self.unit_percent.setChecked(True)
         self.grid_input.setValue(max(1, int(state.get("grid_value", 10))))
         self.grid_check.setChecked(bool(state.get("grid_enabled", True)))
+        self.guide_check.setChecked(bool(state.get("guide_enabled", True)))
         mode = state.get("mode", MODE_INPUT)
         if mode == MODE_VIEW:
             self.mode_screen.setChecked(True)
@@ -499,29 +572,26 @@ class ClipPathWindow(QMainWindow):
         elif mode == MODE_CIRCLE:
             self.mode_circle.setChecked(True)
             self.last_mode_button = self.mode_circle
+            self.circle_tool_button.setChecked(True)
         else:
             self.mode_input.setChecked(True)
             self.last_mode_button = self.mode_input
+            self.circle_tool_button.setChecked(False)
 
     def _save_state(self):
         if not self.state_path:
             return
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        checked = self.mode_group.checkedButton()
-        mode = MODE_INPUT
-        if checked is self.mode_screen:
-            mode = MODE_VIEW
-        elif checked is self.mode_circle:
-            mode = MODE_CIRCLE
         payload = {
             "points": self._serialize_points(self.points),
             "circles": self._serialize_circles(),
-            "mode": mode,
+            "mode": MODE_CIRCLE if self.circle_tool_button.isChecked() else MODE_INPUT,
             "size_w": self.size_w.value(),
             "size_h": self.size_h.value(),
             "unit": "px" if self.unit_px.isChecked() else SIZE_TYPE_PERCENT,
             "grid_value": self.grid_input.value(),
             "grid_enabled": self.grid_check.isChecked(),
+            "guide_enabled": self.guide_check.isChecked(),
         }
         self.state_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
@@ -529,7 +599,7 @@ class ClipPathWindow(QMainWindow):
         )
 
     def _on_mode_clicked(self, btn):
-        self.last_mode_button = btn
+        self.mode_circle.setChecked(btn is self.mode_circle)
         self.canvas.update()
         self._save_state()
 
@@ -543,12 +613,25 @@ class ClipPathWindow(QMainWindow):
         self._refresh_views()
         self._save_state()
 
+    def _on_guide_changed(self, *_):
+        self.canvas.update()
+        self._save_state()
+
+    def _on_circle_tool_toggled(self, checked: bool):
+        self.mode_circle.setChecked(checked)
+        if not checked:
+            self.mode_input.setChecked(True)
+        self.canvas.update()
+        self._save_state()
+
+    def _on_toolbox_toggled(self, checked: bool):
+        self.toolbox_panel.setVisible(checked)
+        self.toolbox_toggle_button.setText("ToolBox" if checked else "ToolBox ▸")
+
     def _effective_mode(self) -> str:
         if self.ctrl_pressed:
             return MODE_VIEW
-        if self.mode_input.isChecked():
-            return MODE_INPUT
-        return MODE_VIEW if self.mode_screen.isChecked() else MODE_CIRCLE
+        return MODE_CIRCLE if self.circle_tool_button.isChecked() else MODE_INPUT
 
     def _get_size(self) -> tuple[float, float, str]:
         unit = "px" if self.unit_px.isChecked() else SIZE_TYPE_PERCENT
@@ -621,6 +704,7 @@ class ClipPathWindow(QMainWindow):
 
         self._table_syncing = False
         self._fit_point_table_columns()
+        self._apply_point_table_drag_feedback()
 
         text = self._build_code()
         self.copy_feedback_base_text = text
@@ -725,6 +809,43 @@ class ClipPathWindow(QMainWindow):
         self.point_table.scrollToItem(self.point_table.item(row, 0), QAbstractItemView.PositionAtCenter)
         x_edit.setFocus(Qt.OtherFocusReason)
         x_edit.selectAll()
+
+    def _on_table_drag_preview_changed(self, source_row: int, target_row: int):
+        self._drag_source_row = source_row
+        self._drag_target_row = target_row
+        self._apply_point_table_drag_feedback()
+
+    def _on_table_drag_state_changed(self, active: bool):
+        if not active:
+            self._drag_source_row = -1
+            self._drag_target_row = -1
+        self._apply_point_table_drag_feedback()
+
+    def _apply_point_table_drag_feedback(self):
+        for row in range(self.point_table.rowCount()):
+            item = self.point_table.item(row, 0)
+            is_source = row == self._drag_source_row
+            is_target = row == self._drag_target_row
+            if item is not None:
+                if is_source:
+                    item.setBackground(QColor("#364153"))
+                    item.setForeground(QColor("#ffffff"))
+                elif is_target:
+                    item.setBackground(QColor("#26303f"))
+                    item.setForeground(QColor("#ffffff"))
+                else:
+                    item.setBackground(QColor(Qt.transparent))
+                    item.setForeground(QColor(self.palette().color(QPalette.Text)))
+            for column in (1, 2):
+                editor = self.point_table.cellWidget(row, column)
+                if not isinstance(editor, QLineEdit):
+                    continue
+                if is_source:
+                    editor.setStyleSheet("padding: 0px 4px; background-color: #2b3445; border: 1px solid #7aa2f7;")
+                elif is_target:
+                    editor.setStyleSheet("padding: 0px 4px; background-color: #1f2836; border-top: 2px solid #e0af68;")
+                else:
+                    editor.setStyleSheet("padding: 0px 4px;")
 
     def _reorder_points(self, source_row: int, target_row: int):
         if not (0 <= source_row < len(self.points) and 0 <= target_row < len(self.points)):
@@ -1169,18 +1290,12 @@ class ClipPathWindow(QMainWindow):
             return
         if event.key() == Qt.Key_Control and not self.ctrl_pressed:
             self.ctrl_pressed = True
-            self.last_mode_button = self.mode_group.checkedButton() or self.last_mode_button
-            self.mode_screen.setChecked(True)
-            self.canvas.set_temp_mode(MODE_VIEW)
             self.canvas.update()
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key_Control:
             self.ctrl_pressed = False
-            if self.last_mode_button:
-                self.last_mode_button.setChecked(True)
-            self.canvas.set_temp_mode(None)
             self.canvas.update()
         super().keyReleaseEvent(event)
 

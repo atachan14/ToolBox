@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSize, Signal, Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QBoxLayout, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSizePolicy, QSpacerItem, QVBoxLayout, QWidget
 
 from core.flow_layout import FlowLayout
 from .color_utils import color_text_from_qcolor, display_color_text, parse_color_text, qcolor_from_text
@@ -64,17 +64,32 @@ class GradientPalette(QFrame):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
 
-        header = QHBoxLayout()
-        header.setSpacing(4)
-        header.addWidget(QLabel("Color"))
+        self.header_host = QWidget()
+        self.header_host.setMinimumWidth(0)
+        self.header_box = QBoxLayout(QBoxLayout.LeftToRight, self.header_host)
+        self.header_box.setContentsMargins(0, 0, 0, 0)
+        self.header_box.setSpacing(4)
+        self.color_row = QWidget()
+        color_row_layout = QHBoxLayout(self.color_row)
+        color_row_layout.setContentsMargins(0, 0, 0, 0)
+        color_row_layout.setSpacing(4)
+        color_row_layout.addWidget(QLabel("Color"))
         self.color_edit = QLineEdit()
-        self.color_edit.setMinimumWidth(0)
-        header.addWidget(self.color_edit, 1)
-        header.addWidget(QLabel("Alpha"))
+        self.color_edit.setMinimumWidth(54)
+        self.color_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        color_row_layout.addWidget(self.color_edit, 1)
+        self.alpha_row = QWidget()
+        alpha_row_layout = QHBoxLayout(self.alpha_row)
+        alpha_row_layout.setContentsMargins(0, 0, 0, 0)
+        alpha_row_layout.setSpacing(4)
+        alpha_row_layout.addWidget(QLabel("Alpha"))
         self.alpha_edit = QLineEdit()
-        self.alpha_edit.setFixedWidth(52)
-        header.addWidget(self.alpha_edit)
-        layout.addLayout(header)
+        self.alpha_edit.setMinimumWidth(44)
+        self.alpha_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        alpha_row_layout.addWidget(self.alpha_edit)
+        self.header_box.addWidget(self.color_row, 1)
+        self.header_box.addWidget(self.alpha_row, 1)
+        layout.addWidget(self.header_host)
 
         self.swatch_wrap = FlowLayoutWidget()
         self.swatch_wrap.setMinimumWidth(0)
@@ -87,22 +102,25 @@ class GradientPalette(QFrame):
         self.swatch_wrap.set_flow_layout(self.swatch_layout)
         layout.addWidget(self.swatch_wrap)
 
-        footer = QHBoxLayout()
-        footer.setSpacing(4)
+        self.footer_host = QWidget()
+        self.footer_host.setMinimumWidth(0)
+        self.footer_grid = QGridLayout(self.footer_host)
+        self.footer_grid.setContentsMargins(0, 0, 0, 0)
+        self.footer_grid.setHorizontalSpacing(4)
+        self.footer_grid.setVerticalSpacing(4)
         self.reset_palette_button = QPushButton("Reset")
         self.save_palette_button = QPushButton("Save")
         self.load_palette_button = QPushButton("Load")
-        footer.addWidget(self.reset_palette_button)
-        footer.addStretch(1)
-        footer.addWidget(self.save_palette_button)
-        footer.addWidget(self.load_palette_button)
-        layout.addLayout(footer)
+        for button in (self.reset_palette_button, self.save_palette_button, self.load_palette_button):
+            button.setMinimumWidth(52)
+        layout.addWidget(self.footer_host)
 
         self.color_edit.editingFinished.connect(self._on_inputs_edited)
         self.alpha_edit.editingFinished.connect(self._on_inputs_edited)
         self.reset_palette_button.clicked.connect(self.resetRequested.emit)
         self.save_palette_button.clicked.connect(self.saveRequested.emit)
         self.load_palette_button.clicked.connect(self.loadRequested.emit)
+        self._update_footer_layout()
 
     def hasHeightForWidth(self) -> bool:
         return True
@@ -114,9 +132,21 @@ class GradientPalette(QFrame):
         margins = layout.contentsMargins()
         spacing = layout.spacing()
         inner_width = max(0, width - margins.left() - margins.right())
-        header_height = layout.itemAt(0).sizeHint().height() if layout.count() > 0 else 0
+        header_height = self.header_host.sizeHint().height()
         swatch_height = self.swatch_wrap.heightForWidth(inner_width)
-        footer_height = layout.itemAt(2).sizeHint().height() if layout.count() > 2 else 0
+        button_height = max(
+            self.reset_palette_button.sizeHint().height(),
+            self.save_palette_button.sizeHint().height(),
+            self.load_palette_button.sizeHint().height(),
+        )
+        footer_spacing = self.footer_grid.verticalSpacing()
+        footer_mode = self._footer_mode_for_width(inner_width)
+        if footer_mode in (1, 2):
+            footer_height = button_height
+        elif footer_mode == 3:
+            footer_height = button_height * 2 + footer_spacing
+        else:
+            footer_height = button_height * 3 + footer_spacing * 2
         total = margins.top() + margins.bottom() + header_height + swatch_height + footer_height
         if layout.count() > 1:
             total += spacing
@@ -126,22 +156,15 @@ class GradientPalette(QFrame):
 
     def sizeHint(self):
         hint = super().sizeHint()
-        if hint.width() > 0:
-            return hint
-        return self.minimumSizeHint()
+        compact_width = 180
+        return QSize(min(compact_width, max(120, hint.width())), hint.height())
 
     def minimumSizeHint(self):
         layout = self.layout()
         if layout is None:
             return super().minimumSizeHint()
-        margins = layout.contentsMargins()
-        width = max(
-            layout.itemAt(0).minimumSize().width() if layout.count() > 0 else 0,
-            self.swatch_wrap.minimumSizeHint().width(),
-            layout.itemAt(2).minimumSize().width() if layout.count() > 2 else 0,
-        ) + margins.left() + margins.right()
         base = super().minimumSizeHint()
-        return base.expandedTo(layout.minimumSize()).expandedTo(QSize(width, base.height()))
+        return base.expandedTo(QSize(120, base.height()))
 
     def _sync_swatch_wrap_height(self):
         width = max(0, self.swatch_wrap.width())
@@ -151,6 +174,61 @@ class GradientPalette(QFrame):
         self.swatch_wrap.setFixedHeight(target_height)
         self.swatch_wrap.updateGeometry()
         self.updateGeometry()
+
+    def _update_header_layout(self):
+        inner_width = max(0, self.width() - self.layout().contentsMargins().left() - self.layout().contentsMargins().right())
+        threshold = self.color_row.minimumSizeHint().width() + self.alpha_row.minimumSizeHint().width() + self.header_box.spacing()
+        self.header_box.setDirection(QBoxLayout.LeftToRight if inner_width >= threshold else QBoxLayout.TopToBottom)
+        self.header_host.updateGeometry()
+
+    def _footer_mode_for_width(self, inner_width: int) -> int:
+        def _effective_width(button: QPushButton) -> int:
+            return button.minimumWidth() if button.minimumWidth() > 0 else button.minimumSizeHint().width()
+
+        spacing = self.footer_grid.horizontalSpacing()
+        reset_width = _effective_width(self.reset_palette_button)
+        save_width = _effective_width(self.save_palette_button)
+        load_width = _effective_width(self.load_palette_button)
+        inline_width = reset_width + save_width + load_width + (spacing * 2)
+        spaced_inline_width = inline_width + 24
+        save_load_width = save_width + load_width + spacing
+        if inner_width >= spaced_inline_width:
+            return 1
+        if inner_width >= inline_width:
+            return 2
+        if inner_width >= save_load_width:
+            return 3
+        return 4
+
+    def _clear_footer_layout(self):
+        while self.footer_grid.count():
+            item = self.footer_grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(self.footer_host)
+
+    def _update_footer_layout(self):
+        inner_width = max(0, self.width() - self.layout().contentsMargins().left() - self.layout().contentsMargins().right())
+        mode = self._footer_mode_for_width(inner_width)
+        self._clear_footer_layout()
+        if mode == 1:
+            self.footer_grid.addWidget(self.reset_palette_button, 0, 0)
+            self.footer_grid.addItem(QSpacerItem(0, 0, QSizePolicy.Expanding, QSizePolicy.Minimum), 0, 1)
+            self.footer_grid.addWidget(self.save_palette_button, 0, 2)
+            self.footer_grid.addWidget(self.load_palette_button, 0, 3)
+        elif mode == 2:
+            self.footer_grid.addWidget(self.reset_palette_button, 0, 0)
+            self.footer_grid.addWidget(self.save_palette_button, 0, 1)
+            self.footer_grid.addWidget(self.load_palette_button, 0, 2)
+        elif mode == 3:
+            self.footer_grid.addWidget(self.reset_palette_button, 0, 0, 1, 2)
+            self.footer_grid.addWidget(self.save_palette_button, 1, 0)
+            self.footer_grid.addWidget(self.load_palette_button, 1, 1)
+        else:
+            self.footer_grid.addWidget(self.reset_palette_button, 0, 0)
+            self.footer_grid.addWidget(self.save_palette_button, 1, 0)
+            self.footer_grid.addWidget(self.load_palette_button, 2, 0)
+        self.footer_host.updateGeometry()
 
     def _clear_swatch_buttons(self):
         while self.swatch_layout.count():
@@ -350,6 +428,8 @@ class GradientPalette(QFrame):
         self.colorsChanged.emit(list(self.palette_colors))
 
     def resizeEvent(self, event):
+        self._update_header_layout()
+        self._update_footer_layout()
         self.swatch_layout.invalidate()
         self._sync_swatch_wrap_height()
         self.layout().invalidate()
