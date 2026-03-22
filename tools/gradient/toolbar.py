@@ -21,7 +21,7 @@ class GradientToolbar(QWidget):
         border_color = self.palette().color(QPalette.Mid).name()
         self.setStyleSheet(
             f"""
-            #size_box, #grid_box {{
+            #size_box, #grid_box, #guide_box {{
                 border: 1px solid {border_color};
                 border-radius: 6px;
             }}
@@ -57,11 +57,17 @@ class GradientToolbar(QWidget):
             button.setStyleSheet("padding: 0px 6px;")
             size_layout.addWidget(button)
         self.unit_percent.setChecked(True)
-        size_layout.addWidget(QLabel("Guide:"))
+
+        guide_box = QWidget()
+        guide_box.setObjectName("guide_box")
+        guide_layout = QHBoxLayout(guide_box)
+        guide_layout.setContentsMargins(4, 2, 4, 2)
+        guide_layout.setSpacing(2)
+        guide_layout.addWidget(QLabel("Guide:"))
         self.guide_check = QCheckBox()
         self.guide_check.setChecked(True)
         self.guide_check.setFixedHeight(self._button_height)
-        size_layout.addWidget(self.guide_check)
+        guide_layout.addWidget(self.guide_check)
 
         grid_box = QWidget()
         grid_box.setObjectName("grid_box")
@@ -83,6 +89,7 @@ class GradientToolbar(QWidget):
 
         layout.addWidget(size_box)
         layout.addWidget(grid_box)
+        layout.addWidget(guide_box)
 
     def _connect_ui(self):
         self.size_h.valueChanged.connect(lambda *_: self.changed.emit())

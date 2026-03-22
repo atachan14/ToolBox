@@ -24,14 +24,18 @@
             3.color
 
 # Clip-Path #
-    - Canvas内のpointクリック時にpointsの対象Xをフォーカスして文字列を全選択。
-    - pointsの入力欄クリック時に、対象のフィールドを全選択する。
-    - pointsのindex左クリック+ドラッグで並び変え
-    - pointsのindex右クリックでindex_menuを開いて「前に挿入」と「後ろに挿入」を表示。
-        - 選択した位置に新しくpointを生成（座標は0,0）
-    - codeをhover時にポップアップを表示
-        - "click : copy and save at history \n
-        scroll : side scroll"（英文が不自然だったら自然なものに直して）
+## 改善案 ##
+    - ToolbarのModeの削除。
+        - 旧[入力]での操作を基本の操作とする。
+        - Ctrlで[画面]に切り替わるという仕様を削除し、単にCtrl+〇〇をコマンドとして扱って旧[画面]時の挙動を引き継ぐ（例：Ctrl+ホイールで拡大縮小や、Ctrl+ドラッグでパン移動）。
+        - [円]は独立したモードとしてCanvas内の左下に配置。
+    - Guideチェックボックス追加
+        - Gridの次の要素として追加
+        - onがデフォルト
+        - off
+            - ガイド線を非表示にする
+            - pointと、pointを結ぶ線も非表示にする
+            - (非表示の)ガイド線内且つpointとpointを結ぶ線の中にある部分に色を塗る
 
 
 # 新規Tool案 #

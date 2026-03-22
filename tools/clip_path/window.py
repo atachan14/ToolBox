@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QSize, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QCursor, QFontMetrics, QKeyEvent, QMouseEvent, QPainter, QPalette, QPen, QPixmap, QTextLayout, QWheelEvent
+from PySide6.QtGui import QColor, QCursor, QFontMetrics, QKeyEvent, QMouseEvent, QPainter, QPalette, QPen, QPixmap, QShowEvent, QTextLayout, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -373,14 +373,20 @@ class ClipPathWindow(QMainWindow):
         self.point_table.setMinimumWidth(140)
         right_layout.addWidget(self.point_table)
 
-        buttons = QHBoxLayout()
+        buttons = QVBoxLayout()
         buttons.setSpacing(4)
         self.reset_button = QPushButton("Reset")
+        self.save_history_button = QPushButton("履歴に保存")
         self.show_history_button = QPushButton("履歴を表示")
         self.reset_button.setFixedHeight(self._toolbar_button_height)
+        self.save_history_button.setFixedHeight(self._toolbar_button_height)
         self.show_history_button.setFixedHeight(self._toolbar_button_height)
         buttons.addWidget(self.reset_button)
-        buttons.addWidget(self.show_history_button)
+        history_buttons = QHBoxLayout()
+        history_buttons.setSpacing(4)
+        history_buttons.addWidget(self.save_history_button)
+        history_buttons.addWidget(self.show_history_button)
+        buttons.addLayout(history_buttons)
         right_layout.addLayout(buttons)
 
         splitter.addWidget(right)
@@ -420,6 +426,7 @@ class ClipPathWindow(QMainWindow):
         self.grid_input.valueChanged.connect(self._on_grid_changed)
         self.grid_check.toggled.connect(self._on_grid_changed)
         self.reset_button.clicked.connect(self._reset_state)
+        self.save_history_button.clicked.connect(self._save_current_to_history)
         self.show_history_button.clicked.connect(self._show_history_dialog)
         self.point_table.rowReordered.connect(self._reorder_points)
         self.point_table.indexMenuRequested.connect(self._show_point_index_menu)
@@ -837,6 +844,27 @@ class ClipPathWindow(QMainWindow):
         entries.insert(0, entry)
         self.history_path.write_text(json.dumps(entries[: self.MAX_HISTORY], ensure_ascii=False, indent=2), encoding="utf-8")
 
+    def _flash_code_feedback(self, text: str, color: str, restore_delay_ms: int = 700):
+        self._code_full_text = text
+        self.code_label.setStyleSheet(f"padding: 0px 4px; color: {color}; background: transparent; border: none;")
+        self.code_label.setText(text)
+        self._update_code_label_layout(reset_scroll=True)
+
+        def _restore():
+            self._code_full_text = self.copy_feedback_base_text
+            self.code_label.setStyleSheet("padding: 0px 4px; background: transparent; border: none;")
+            self.code_label.setText(self.copy_feedback_base_text)
+            self._update_code_label_layout(reset_scroll=True)
+
+        QTimer.singleShot(restore_delay_ms, _restore)
+
+    def _save_current_to_history(self):
+        if len(self.points) <= 2:
+            self._flash_code_feedback("3つ以上の点を設定してください", "#f7768e", 900)
+            return
+        self._save_history_entry(self._build_code())
+        self._flash_code_feedback("saved to history", "#4ecdc4")
+
     def _on_code_clicked(self, _event):
         if len(self.points) <= 2:
             self._code_full_text = "3つ以上の点を配置してください"
@@ -1155,3 +1183,7 @@ class ClipPathWindow(QMainWindow):
             self.canvas.set_temp_mode(None)
             self.canvas.update()
         super().keyReleaseEvent(event)
+
+    def showEvent(self, event: QShowEvent):
+        super().showEvent(event)
+        QTimer.singleShot(0, lambda: self._update_code_label_layout(reset_scroll=True))

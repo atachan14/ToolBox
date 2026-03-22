@@ -45,6 +45,14 @@ class MarkdownEditor(QPlainTextEdit):
         self.setCurrentCharFormat(QTextCharFormat())
 
     def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Up:
+            cursor = self.textCursor()
+            block = cursor.block()
+            if block.isValid() and not block.previous().isValid():
+                cursor.movePosition(QTextCursor.StartOfBlock)
+                self.setTextCursor(cursor)
+                return
+
         if event.key() == Qt.Key_Down:
             cursor = self.textCursor()
             block = cursor.block()

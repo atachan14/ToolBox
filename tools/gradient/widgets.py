@@ -20,7 +20,16 @@ def alpha_pattern_specs(color_text: str) -> tuple[QColor, QColor, float]:
 
 def alpha_pattern_text_color(color_text: str) -> str:
     base, _stripe, _alpha = alpha_pattern_specs(color_text)
-    return "#111827" if base.lightnessF() > 0.62 else "#f8fafc"
+
+    def _linear(channel: float) -> float:
+        return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+
+    luminance = (
+        0.2126 * _linear(base.redF())
+        + 0.7152 * _linear(base.greenF())
+        + 0.0722 * _linear(base.blueF())
+    )
+    return "#111827" if luminance > 0.36 else "#f8fafc"
 
 
 def paint_alpha_pattern(painter: QPainter, rect: QRectF, color_text: str, border_color: str, border_width: int = 1, radius: float = 4.0):

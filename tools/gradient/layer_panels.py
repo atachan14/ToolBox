@@ -5,7 +5,7 @@ from PySide6.QtGui import QColor, QCursor, QBrush
 from PySide6.QtWidgets import QAbstractItemView, QCheckBox, QFrame, QHeaderView, QHBoxLayout, QLabel, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from .color_utils import display_color_text, split_color_and_alpha
-from .widgets import AlphaPatternLineEdit
+from .widgets import AlphaPatternLineEdit, alpha_pattern_text_color
 
 
 class StopTableWidget(QTableWidget):
@@ -109,11 +109,30 @@ class StopTableWidget(QTableWidget):
         painter.drawRect(0, row_y, self.viewport().width() - 1, row_h - 1)
 
 
+class BackgroundColorLineEdit(AlphaPatternLineEdit):
+    colorDropped = Signal(str)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat("application/x-gradient-color"):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasFormat("application/x-gradient-color"):
+            color = bytes(event.mimeData().data("application/x-gradient-color")).decode("utf-8").strip()
+            if color:
+                self.colorDropped.emit(color)
+                event.acceptProposedAction()
+                return
+        super().dropEvent(event)
+
+
 def build_pending_inspector(kind: str) -> QWidget:
     panel = QWidget()
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(8, 8, 8, 8)
-    note = QLabel(f"{kind}-gradient implementation is pending. UI shell only for now.")
+    note = QLabel("未実装")
     note.setWordWrap(True)
     frame = QFrame()
     frame.setFrameShape(QFrame.StyledPanel)
@@ -130,7 +149,7 @@ def style_color_value_widget(widget: QWidget, color: str):
         widget.set_pattern_color(color)
 
 
-def build_background_inspector(layer: dict) -> QWidget:
+def build_background_inspector(layer: dict, on_item_changed, on_context_requested, on_color_dropped) -> QWidget:
     panel = QWidget()
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(8, 8, 8, 8)
@@ -139,8 +158,13 @@ def build_background_inspector(layer: dict) -> QWidget:
     frame_layout = QVBoxLayout(frame)
     frame_layout.setContentsMargins(10, 10, 10, 10)
     frame_layout.addWidget(QLabel("Color"))
-    color_value = AlphaPatternLineEdit(str(layer.get("color", "#00000000")))
-    color_value.setReadOnly(True)
+    color_value = BackgroundColorLineEdit(str(layer.get("color", "#00000000")))
+    color_value.setReadOnly(False)
+    color_value.setAcceptDrops(True)
+    color_value.editingFinished.connect(lambda item=layer, widget=color_value: on_item_changed(item, widget))
+    color_value.setContextMenuPolicy(Qt.CustomContextMenu)
+    color_value.customContextMenuRequested.connect(lambda pos, item=layer, widget=color_value: on_context_requested(item, widget, pos))
+    color_value.colorDropped.connect(lambda color, item=layer: on_color_dropped(item, color))
     color_value.setText(display_color_text(str(layer.get("color", "#00000000"))))
     style_color_value_widget(color_value, str(layer.get("color", "#00000000")))
     frame_layout.addWidget(color_value)
@@ -182,10 +206,10 @@ def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_re
     table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
     table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
     table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
-    table.setColumnWidth(0, 8)
-    table.setColumnWidth(1, 64)
+    table.setColumnWidth(0, 4)
+    table.setColumnWidth(1, 56)
     table.setColumnWidth(2, 44)
-    table.setColumnWidth(3, 52)
+    table.setColumnWidth(3, 48)
     table.setSelectionMode(QAbstractItemView.NoSelection)
     table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
     table.setAcceptDrops(True)
@@ -223,7 +247,9 @@ def populate_linear_stop_table(table: QTableWidget, layer: dict, format_stop_val
                 item.setBackground(muted_bg)
                 item.setForeground(muted_fg)
         else:
-            color_item.setBackground(QColor(str(stop.get("color", "#ffffff"))))
+            color_value = str(stop.get("color", "#ffffff"))
+            color_item.setBackground(QColor(color_value))
+            color_item.setForeground(QBrush(QColor(alpha_pattern_text_color(color_value))))
         table.setItem(row, 0, index_item)
         table.setItem(row, 1, color_item)
         table.setItem(row, 2, alpha_item)

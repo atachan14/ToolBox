@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QResizeEvent, QShortcut, QWheelEvent
+from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QResizeEvent, QShortcut, QShowEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from .canvas import GradientCanvas, GradientCanvasConfig
@@ -151,9 +151,9 @@ class GradientWindow(QMainWindow):
         right_layout.addLayout(buttons_wrap)
 
         self.main_splitter.addWidget(right)
-        left.setMinimumWidth(100)
-        right.setMinimumWidth(150)
-        self.main_splitter.setSizes([420, 180])
+        left.setMinimumWidth(1)
+        right.setFixedWidth(200)
+        self.main_splitter.setSizes([200, 200])
 
         self.footer = GradientFooter(self._on_code_clicked, self._on_code_wheel)
         root_layout.addWidget(self.footer)
@@ -445,7 +445,12 @@ class GradientWindow(QMainWindow):
     def _build_layer_inspector(self, layer: dict) -> QWidget:
         kind = layer.get("kind")
         if kind == "background":
-            return build_background_inspector(layer)
+            return build_background_inspector(
+                layer,
+                self._on_background_value_edited,
+                self._on_background_context_requested,
+                self._on_background_color_dropped,
+            )
         if kind == "linear":
             return build_linear_inspector(
                 layer,
@@ -485,6 +490,31 @@ class GradientWindow(QMainWindow):
             color_value.setText(display_color_text(color))
             style_color_value_widget(color_value, color)
         self._refresh_all()
+
+    def _on_background_value_edited(self, layer: dict, widget: QLineEdit):
+        parsed = parse_color_text(widget.text())
+        if parsed is None:
+            widget.setText(display_color_text(str(layer.get("color", "#00000000"))))
+            style_color_value_widget(widget, str(layer.get("color", "#00000000")))
+            return
+        self._set_background_color(layer, parsed)
+
+    def _on_background_context_requested(self, layer: dict, widget: QLineEdit, pos: QPoint):
+        menu = QMenu(widget)
+        color_pick_action = menu.addAction("カラーピック")
+        action = menu.exec(widget.mapToGlobal(pos))
+        if action != color_pick_action:
+            return
+        dialog = SwatchDialog(str(layer.get("color", "#00000000")), self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self._set_background_color(layer, dialog.selected_color)
+
+    def _on_background_color_dropped(self, layer: dict, color: str):
+        parsed = parse_color_text(color)
+        if parsed is None:
+            return
+        self._set_background_color(layer, parsed)
 
     def _apply_palette_to_background_from_canvas(self):
         layer = self._active_layer()
@@ -747,6 +777,10 @@ class GradientWindow(QMainWindow):
         super().resizeEvent(event)
         self._update_code_label_layout()
 
+    def showEvent(self, event: QShowEvent):
+        super().showEvent(event)
+        QTimer.singleShot(0, lambda: self._update_code_label_layout(reset_scroll=True))
+
     def _code_max_scroll_offset(self, text: str, available_width: int, font_metrics) -> int:
         if font_metrics.horizontalAdvance(text) <= available_width:
             return 0
@@ -756,14 +790,26 @@ class GradientWindow(QMainWindow):
                 return offset
         return max(0, len(text) - 1)
 
-    def _code_display_text(self, text: str, offset: int, available_width: int, font_metrics) -> str:
+    def _code_display_text(self, text: str, offset: int, available_width: int, font_metrics) -> tuple[str, bool]:
         prefix = "..." if offset > 0 else ""
         visible = text[offset:]
         has_tail = False
         while visible and font_metrics.horizontalAdvance(f"{prefix}{visible}") > available_width:
             visible = visible[:-1]
             has_tail = True
-        return f"{prefix}{visible}{'...' if has_tail else ''}"
+        if not visible:
+            visible = text[min(offset, len(text) - 1)]
+            has_tail = offset < len(text) - 1
+        suffix = "..." if has_tail else ""
+        display_text = f"{prefix}{visible}{suffix}"
+        while display_text and font_metrics.horizontalAdvance(display_text) > available_width:
+            if has_tail and len(visible) > 1:
+                visible = visible[:-1]
+                display_text = f"{prefix}{visible}..."
+                continue
+            display_text = font_metrics.elidedText(display_text, Qt.ElideRight, available_width)
+            break
+        return display_text, has_tail
 
     def _update_code_label_layout(self, reset_scroll: bool = False):
         text = self._code_full_text
@@ -774,12 +820,15 @@ class GradientWindow(QMainWindow):
         if metrics.horizontalAdvance(text) <= available_width:
             self.footer.code_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.footer.code_label.setText(text)
+            self.footer.code_label.setCursorPosition(0)
             self._code_scroll_offset = 0
             return
         self.footer.code_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         max_offset = self._code_max_scroll_offset(text, available_width, metrics)
         self._code_scroll_offset = max(0, min(self._code_scroll_offset, max_offset))
-        self.footer.code_label.setText(self._code_display_text(text, self._code_scroll_offset, available_width, metrics))
+        display_text, _ = self._code_display_text(text, self._code_scroll_offset, available_width, metrics)
+        self.footer.code_label.setText(display_text)
+        self.footer.code_label.setCursorPosition(0)
 
     def _on_code_wheel(self, event: QWheelEvent):
         if not self._code_full_text:
@@ -835,12 +884,12 @@ class GradientWindow(QMainWindow):
         QApplication.clipboard().setText(code)
         self._save_history_entry(code)
         self._code_full_text = "copy and saved"
-        self.footer.code_label.setStyleSheet("padding: 0px 4px; color: #4ecdc4; background: transparent; border: none;")
+        self.footer.code_label.setStyleSheet("color: #4ecdc4; background: transparent; border: none;")
         self._update_code_label_layout(reset_scroll=True)
 
         def _restore():
             self._code_full_text = self.copy_feedback_base_text
-            self.footer.code_label.setStyleSheet("padding: 0px 4px; background: transparent; border: none;")
+            self.footer.code_label.setStyleSheet("background: transparent; border: none;")
             self._update_code_label_layout(reset_scroll=True)
 
         QTimer.singleShot(700, _restore)

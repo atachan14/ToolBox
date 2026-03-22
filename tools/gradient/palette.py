@@ -171,7 +171,7 @@ class GradientPalette(QFrame):
             self.swatch_layout.addWidget(button)
         add_button = QPushButton("+")
         add_button.setFixedSize(24, 24)
-        add_button.clicked.connect(self._append_transparent_swatch)
+        add_button.clicked.connect(self._append_swatch_from_dialog)
         self.swatch_layout.addWidget(add_button)
         self.swatch_layout.invalidate()
         self._sync_swatch_wrap_height()
@@ -237,8 +237,11 @@ class GradientPalette(QFrame):
         self.colorSelected.emit(new_color)
         self.colorsChanged.emit(list(self.palette_colors))
 
-    def _append_transparent_swatch(self):
-        self.palette_colors.append("#00000000")
+    def _append_swatch_from_dialog(self):
+        dialog = SwatchDialog("#00000000", self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self.palette_colors.append(dialog.selected_color)
         self._rebuild_swatch_buttons()
         self.select_index(len(self.palette_colors) - 1)
         self.colorsChanged.emit(list(self.palette_colors))

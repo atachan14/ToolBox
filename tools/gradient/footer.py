@@ -25,7 +25,8 @@ class GradientFooter(QWidget):
         self.code_label.setFrame(False)
         self.code_label.setFixedHeight(30)
         self.code_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.code_label.setStyleSheet("padding: 0px 4px; background: transparent; border: none;")
+        self.code_label.setTextMargins(4, 0, 4, 0)
+        self.code_label.setStyleSheet("background: transparent; border: none;")
         self.code_label.setToolTip("Click to copy and save to history.\nScroll to view horizontally.")
         layout.addWidget(self.code_label, 1)
 
