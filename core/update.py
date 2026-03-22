@@ -3,6 +3,7 @@ import zipfile
 import tempfile
 import subprocess
 import sys
+import os
 from pathlib import Path
 from core.version import VERSION
 
@@ -63,7 +64,7 @@ def extract_update(zip_path):
     return extract_dir
 
 
-def launch_updater(extract_dir):
+def launch_updater(extract_dir, parent_pid=None):
 
     base = Path(sys.executable).parent
     updater = base / "updater.exe"
@@ -72,10 +73,13 @@ def launch_updater(extract_dir):
         print("updater.exe not found")
         return
 
-    subprocess.Popen([
+    args = [
         updater,
         str(extract_dir),
         str(base)
-    ])
+    ]
 
-    sys.exit()
+    if parent_pid is not None:
+        args.append(str(parent_pid))
+
+    subprocess.Popen(args)

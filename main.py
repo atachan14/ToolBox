@@ -1,4 +1,5 @@
 import sys
+import os
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QIcon
 
@@ -48,10 +49,9 @@ def main():
             zip_path = download_update(update["url"])
             extract_dir = extract_update(zip_path)
 
-            launch_updater(extract_dir)
-            
-            QApplication.quit()
-            sys.exit()
+            launch_updater(extract_dir, os.getpid())
+            app.quit()
+            return
 
     window = MainWindow()
     window.setWindowIcon(icon)

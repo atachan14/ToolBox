@@ -8,6 +8,7 @@
         - color調整
 
 ## markdown ##
+    - 最下行や最上行でのShift+矢印
         - import時にTabのリネーム（重複時index）
         - ドラッグでimport
         - export時にTab名をファイル名にする。
