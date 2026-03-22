@@ -23,6 +23,17 @@
             2.文字サイズ（ctrlスクロール対応）
             3.color
 
+# Clip-Path #
+    - Canvas内のpointクリック時にpointsの対象Xをフォーカスして文字列を全選択。
+    - pointsの入力欄クリック時に、対象のフィールドを全選択する。
+    - pointsのindex左クリック+ドラッグで並び変え
+    - pointsのindex右クリックでindex_menuを開いて「前に挿入」と「後ろに挿入」を表示。
+        - 選択した位置に新しくpointを生成（座標は0,0）
+    - codeをhover時にポップアップを表示
+        - "click : copy and save at history \n
+        scroll : side scroll"（英文が不自然だったら自然なものに直して）
+
+
 # 新規Tool案 #
     - linear-gradient
     - クリップボード
