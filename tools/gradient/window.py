@@ -4,64 +4,27 @@ import json
 import math
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPixmap, QResizeEvent, QTextLayout, QWheelEvent
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QResizeEvent, QShortcut, QWheelEvent
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from .canvas import GradientCanvas, GradientCanvasConfig
-from .color_utils import combine_color_and_alpha, display_color_text, parse_color_text, split_color_and_alpha
+from .color_utils import display_color_text, parse_color_text
 from .footer import GradientFooter
+from .history_preview import GradientHistoryItemWidget, build_history_preview_lines, history_preview_height, render_history_preview_pixmap
 from .layer_panels import build_background_inspector, build_linear_inspector, build_pending_inspector, populate_linear_stop_table, style_color_value_widget
+from .linear_layer import append_stop, append_stop_after_last, delete_stop, duplicate_stop, linear_stops_css, move_stop, reorder_stop, set_stop_color, step_stop, toggle_stop_muted, update_stop_from_table
 from .palette_data_window import PaletteDataWindow
 from .palette import GradientPalette
 from .palette_storage import delete_palette, load_palettes, palette_dir, rename_palette, save_palette
+from .state import normalize_layer_payload, normalize_palette_colors, serialize_layers
 from .toolbar import GradientToolbar
 from .widgets import SwatchDialog
 
 
-class GradientHistoryItemWidget(QWidget):
-    def __init__(self, pixmap: QPixmap, code_text: str, parent: QWidget | None = None):
-        super().__init__(parent)
-        self._pixmap = pixmap
-        self.base_code_text = code_text
-        self._display_lines = [code_text]
-        self._display_color = QColor(self.palette().color(self.foregroundRole()))
-        self._text_width = 120
-
-    def set_text_width(self, width: int):
-        self._text_width = width
-        self.update()
-
-    def set_preview_lines(self, lines: list[str]):
-        self._display_lines = lines or [""]
-        self._display_color = QColor(self.palette().color(self.foregroundRole()))
-        self.update()
-
-    def set_feedback_text(self, text: str):
-        self._display_lines = [text]
-        self._display_color = QColor("#4ecdc4")
-        self.update()
-
-    def line_count(self) -> int:
-        return max(1, len(self._display_lines) or 1)
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        painter = QPainter(self)
-        metrics = painter.fontMetrics()
-        margin = 8
-        gap = 10
-        painter.drawPixmap(margin, margin, self._pixmap)
-        painter.setPen(self._display_color)
-        text_x = margin + self._pixmap.width() + gap
-        line_y = margin + metrics.ascent()
-        for line in self._display_lines:
-            painter.drawText(text_x, line_y, line)
-            line_y += metrics.lineSpacing()
-
-
 class GradientWindow(QMainWindow):
     MAX_HISTORY = 100
+    MAX_UNDO = 200
     DEFAULT_HISTORY_DIALOG_WIDTH = 620
     DEFAULT_HISTORY_DIALOG_HEIGHT = 360
     PALETTE_COLORS = [
@@ -90,6 +53,10 @@ class GradientWindow(QMainWindow):
         self.copy_feedback_base_text = ""
         self._history_dialog_width = self.DEFAULT_HISTORY_DIALOG_WIDTH
         self._history_dialog_height = self.DEFAULT_HISTORY_DIALOG_HEIGHT
+        self._undo_stack: list[dict] = []
+        self._redo_stack: list[dict] = []
+        self._applying_undo_redo = False
+        self._undo_batch_depth = 0
 
         self._build_ui()
         self._connect_ui()
@@ -134,6 +101,8 @@ class GradientWindow(QMainWindow):
                 linear_stop_clicked=self._add_stop_from_canvas,
                 linear_stop_moved=self._move_stop_from_canvas,
                 linear_stop_deleted=self._delete_stop_from_canvas,
+                interaction_started=self._begin_undo_batch,
+                interaction_finished=self._end_undo_batch,
             )
         )
         left_layout.addWidget(self.canvas, 1)
@@ -162,15 +131,24 @@ class GradientWindow(QMainWindow):
         self.inspector_tabs.setMovable(True)
         right_layout.addWidget(self.inspector_tabs, 1)
 
-        buttons = QHBoxLayout()
-        buttons.setSpacing(4)
+        buttons_wrap = QVBoxLayout()
+        buttons_wrap.setSpacing(4)
+        buttons_row1 = QHBoxLayout()
+        buttons_row1.setSpacing(4)
+        buttons_row2 = QHBoxLayout()
+        buttons_row2.setSpacing(4)
         self.reset_button = QPushButton("Reset")
+        self.save_history_button = QPushButton("履歴に保存")
         self.show_history_button = QPushButton("履歴を表示")
         self.reset_button.setFixedHeight(self._toolbar_button_height)
+        self.save_history_button.setFixedHeight(self._toolbar_button_height)
         self.show_history_button.setFixedHeight(self._toolbar_button_height)
-        buttons.addWidget(self.reset_button)
-        buttons.addWidget(self.show_history_button)
-        right_layout.addLayout(buttons)
+        buttons_row1.addWidget(self.reset_button)
+        buttons_row2.addWidget(self.save_history_button)
+        buttons_row2.addWidget(self.show_history_button)
+        buttons_wrap.addLayout(buttons_row1)
+        buttons_wrap.addLayout(buttons_row2)
+        right_layout.addLayout(buttons_wrap)
 
         self.main_splitter.addWidget(right)
         left.setMinimumWidth(100)
@@ -196,8 +174,15 @@ class GradientWindow(QMainWindow):
         self.inspector_tabs.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
         self.inspector_tabs.tabBar().customContextMenuRequested.connect(self._show_layer_tab_menu)
         self.reset_button.clicked.connect(self._reset_state)
+        self.save_history_button.clicked.connect(self._save_current_to_history)
         self.show_history_button.clicked.connect(self._show_history_dialog)
         self.main_splitter.splitterMoved.connect(lambda *_: self._save_state())
+        self.undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self.undo_shortcut.activated.connect(self._undo)
+        self.redo_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self)
+        self.redo_shortcut.activated.connect(self._redo)
+        self.redo_alt_shortcut = QShortcut(QKeySequence.Redo, self)
+        self.redo_alt_shortcut.activated.connect(self._redo)
 
     def _get_size(self) -> tuple[float, float, str]:
         return self.toolbar.get_size()
@@ -299,27 +284,83 @@ class GradientWindow(QMainWindow):
         delete_palette(path)
 
     def _history_entry_layers(self) -> list[dict]:
-        return [
-            {
-                "kind": layer.get("kind", "linear"),
-                "deg": int(layer.get("deg", 90)),
-                "repeat": bool(layer.get("repeat", False)),
-                "muted": bool(layer.get("muted", False)),
-                "color": str(layer.get("color", "#00000000")),
-                "stops": [
-                    {
-                        "color": str(stop.get("color", "#ffffff")),
-                        "position": float(stop.get("position", 0.0)),
-                        "muted": bool(stop.get("muted", False)),
-                    }
-                    for stop in layer.get("stops") or []
-                ],
-            }
-            for layer in self.layers
-        ]
+        return serialize_layers(self.layers)
+
+    def _apply_palette_state(self, palette_state, selected_palette_color):
+        colors = normalize_palette_colors(palette_state)
+        if colors:
+            self.palette_colors = colors
+            self.palette.set_palette_colors(colors)
+        selected_palette = str(selected_palette_color or self.palette.palette_colors[0])
+        if selected_palette in self.palette.palette_colors:
+            self.selected_palette_color = selected_palette
+            self.palette.select_color(selected_palette)
+        else:
+            self.selected_palette_color = self.palette.palette_colors[0]
+            self.palette.select_index(0)
+
+    def _apply_layers_state(self, layers_state, active_tab: int = 0):
+        self.layers = []
+        self.inspector_tabs.clear()
+        if isinstance(layers_state, list):
+            for item in layers_state:
+                normalized = normalize_layer_payload(item, self._layer_default_name)
+                if normalized is not None:
+                    self._add_layer(normalized["kind"], normalized)
+        if not self.layers or self.layers[0].get("kind") != "background":
+            self.layers.insert(0, self._new_background_layer())
+            self._rebuild_inspector_tabs()
+        if self.inspector_tabs.count() > 0:
+            self.inspector_tabs.setCurrentIndex(max(0, min(int(active_tab), self.inspector_tabs.count() - 1)))
 
     def _history_entry_state(self) -> dict:
-        return {
+        return self._state_payload(include_ui=False)
+
+    def _record_undo_snapshot(self, clear_redo: bool = True):
+        if self._applying_undo_redo or self._undo_batch_depth > 0:
+            return
+        snapshot = self._state_payload(include_ui=False)
+        if self._undo_stack and self._undo_stack[-1] == snapshot:
+            return
+        self._undo_stack.append(snapshot)
+        if len(self._undo_stack) > self.MAX_UNDO:
+            self._undo_stack = self._undo_stack[-self.MAX_UNDO :]
+        if clear_redo:
+            self._redo_stack.clear()
+
+    def _apply_snapshot(self, snapshot: dict):
+        self._applying_undo_redo = True
+        try:
+            self._apply_history_entry_state(snapshot)
+        finally:
+            self._applying_undo_redo = False
+
+    def _begin_undo_batch(self):
+        self._undo_batch_depth += 1
+
+    def _end_undo_batch(self):
+        if self._undo_batch_depth <= 0:
+            return
+        self._undo_batch_depth -= 1
+        if self._undo_batch_depth == 0:
+            self._record_undo_snapshot()
+
+    def _undo(self):
+        if len(self._undo_stack) < 2:
+            return
+        current = self._undo_stack.pop()
+        self._redo_stack.append(current)
+        self._apply_snapshot(self._undo_stack[-1])
+
+    def _redo(self):
+        if not self._redo_stack:
+            return
+        snapshot = self._redo_stack.pop()
+        self._apply_snapshot(snapshot)
+        self._undo_stack.append(snapshot)
+
+    def _state_payload(self, include_ui: bool) -> dict:
+        payload = {
             "size_w": self.toolbar.size_w.value(),
             "size_h": self.toolbar.size_h.value(),
             "unit": self._unit_name(),
@@ -331,6 +372,15 @@ class GradientWindow(QMainWindow):
             "active_tab": self.inspector_tabs.currentIndex(),
             "layers": self._history_entry_layers(),
         }
+        if include_ui:
+            payload.update(
+                {
+                    "history_dialog_width": self._history_dialog_width,
+                    "history_dialog_height": self._history_dialog_height,
+                    "splitter_sizes": self.main_splitter.sizes(),
+                }
+            )
+        return payload
 
     def _apply_history_entry_state(self, payload: dict):
         state = payload.get("state") if isinstance(payload.get("state"), dict) else payload
@@ -346,52 +396,8 @@ class GradientWindow(QMainWindow):
         unit = state.get("unit", "%")
         self.toolbar.unit_px.setChecked(unit == "px")
         self.toolbar.unit_percent.setChecked(unit != "px")
-
-        palette_state = state.get("palette_colors")
-        if isinstance(palette_state, list) and palette_state:
-            colors = [parse_color_text(str(color)) or "#00000000" for color in palette_state]
-            self.palette_colors = colors
-            self.palette.set_palette_colors(colors)
-        selected_palette = str(state.get("selected_palette_color", self.palette.palette_colors[0]))
-        if selected_palette in self.palette.palette_colors:
-            self.selected_palette_color = selected_palette
-            self.palette.select_color(selected_palette)
-        else:
-            self.selected_palette_color = self.palette.palette_colors[0]
-            self.palette.select_index(0)
-
-        self.layers = []
-        self.inspector_tabs.clear()
-        for item in layers_state:
-            if not isinstance(item, dict):
-                continue
-            kind = str(item.get("kind", "linear"))
-            default_name = "b" if kind == "background" else self._layer_default_name(kind)
-            self._add_layer(
-                kind,
-                {
-                    "kind": kind,
-                    "name": str(item.get("name", default_name)),
-                    "deg": int(item.get("deg", 90)),
-                    "repeat": bool(item.get("repeat", False)),
-                    "muted": bool(item.get("muted", False)),
-                    "color": parse_color_text(str(item.get("color", "#00000000"))) or "#00000000",
-                    "stops": [
-                        {
-                            "color": parse_color_text(str(stop.get("color", "#ffffff"))) or "#ffffff",
-                            "position": float(stop.get("position", 0.0)),
-                            "muted": bool(stop.get("muted", False)),
-                        }
-                        for stop in item.get("stops", [])
-                        if isinstance(stop, dict)
-                    ],
-                },
-            )
-        if not self.layers or self.layers[0].get("kind") != "background":
-            self.layers.insert(0, self._new_background_layer())
-            self._rebuild_inspector_tabs()
-        if self.inspector_tabs.count() > 0:
-            self.inspector_tabs.setCurrentIndex(max(0, min(int(state.get("active_tab", 0)), self.inspector_tabs.count() - 1)))
+        self._apply_palette_state(state.get("palette_colors"), state.get("selected_palette_color", self.palette.palette_colors[0]))
+        self._apply_layers_state(layers_state, int(state.get("active_tab", 0)))
         self._refresh_all()
 
     def _layer_default_name(self, kind: str) -> str:
@@ -460,36 +466,8 @@ class GradientWindow(QMainWindow):
         populate_linear_stop_table(table, layer, self._format_stop_value)
         self._table_syncing = False
 
-    def _visible_stops(self, layer: dict) -> list[dict]:
-        return [stop for stop in (layer.get("stops") or []) if not stop.get("muted", False)]
-
-    def _linear_stops_css(self, layer: dict, stops: list[dict]) -> str:
-        if not stops:
-            return "rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0) 100%"
-        parts: list[str] = []
-        run_color = str(stops[0].get("color", "#ffffff"))
-        run_start = float(stops[0].get("position", 0.0))
-        run_end = run_start
-        for stop in stops[1:]:
-            color = str(stop.get("color", "#ffffff"))
-            position = float(stop.get("position", 0.0))
-            if color == run_color:
-                run_end = position
-                continue
-            color_text = display_color_text(run_color)
-            if abs(run_end - run_start) <= 1e-9:
-                parts.append(f"{color_text} {self._format_stop_value(layer, run_start)}")
-            else:
-                parts.append(f"{color_text} {self._format_stop_value(layer, run_start)} {self._format_stop_value(layer, run_end)}")
-            run_color = color
-            run_start = position
-            run_end = position
-        color_text = display_color_text(run_color)
-        if abs(run_end - run_start) <= 1e-9:
-            parts.append(f"{color_text} {self._format_stop_value(layer, run_start)}")
-        else:
-            parts.append(f"{color_text} {self._format_stop_value(layer, run_start)} {self._format_stop_value(layer, run_end)}")
-        return ", ".join(parts)
+    def _linear_stops_css(self, layer: dict) -> str:
+        return linear_stops_css(layer, self._format_stop_value)
 
     def _update_tab_visuals(self):
         tab_bar = self.inspector_tabs.tabBar()
@@ -517,29 +495,22 @@ class GradientWindow(QMainWindow):
     def _on_stop_table_item_changed(self, layer: dict, table: QTableWidget, item: QTableWidgetItem):
         if self._table_syncing:
             return
-        stops = list(layer.get("stops") or [])
-        if not (0 <= item.row() < len(stops)):
+        color_item = table.item(item.row(), 1)
+        alpha_item = table.item(item.row(), 2)
+        value_item = table.item(item.row(), 3)
+        if color_item is None or alpha_item is None or value_item is None:
+            self._populate_stop_table(table, layer)
             return
-        if item.column() == 3:
-            parsed = self._parse_stop_value(layer, item.text())
-            if parsed is None:
-                self._populate_stop_table(table, layer)
-                return
-            stops[item.row()]["position"] = parsed
-        elif item.column() in (1, 2):
-            color_item = table.item(item.row(), 1)
-            alpha_item = table.item(item.row(), 2)
-            if color_item is None or alpha_item is None:
-                self._populate_stop_table(table, layer)
-                return
-            combined = combine_color_and_alpha(color_item.text(), alpha_item.text())
-            if combined is None:
-                self._populate_stop_table(table, layer)
-                return
-            stops[item.row()]["color"] = combined
-        else:
+        if not update_stop_from_table(
+            layer,
+            item.row(),
+            item.column(),
+            color_item.text(),
+            alpha_item.text(),
+            value_item.text(),
+            self._parse_stop_value,
+        ):
             return
-        layer["stops"] = stops
         self._refresh_all()
 
     def _on_stop_table_context_requested(self, layer: dict, table: QTableWidget, pos: QPoint):
@@ -559,67 +530,32 @@ class GradientWindow(QMainWindow):
             dialog = SwatchDialog(str(stops[item.row()].get("color", "#ffffff")), self)
             if dialog.exec() != QDialog.Accepted:
                 return
-            stops[item.row()]["color"] = dialog.selected_color
-            layer["stops"] = stops
+            set_stop_color(layer, item.row(), dialog.selected_color)
             self._refresh_all()
             return
         if action == mute_action:
-            stops[item.row()]["muted"] = not bool(stops[item.row()].get("muted", False))
-            layer["stops"] = stops
+            toggle_stop_muted(layer, item.row())
             self._refresh_all()
             return
         if action == duplicate_action:
-            duplicate = {
-                "color": str(stops[item.row()].get("color", "#ffffff")),
-                "position": float(stops[item.row()].get("position", 0.0)),
-                "muted": bool(stops[item.row()].get("muted", False)),
-            }
-            stops.insert(item.row() + 1, duplicate)
-            layer["stops"] = stops
+            duplicate_stop(layer, item.row())
             self._refresh_all()
             return
         if action == delete_action:
-            stops.pop(item.row())
-            layer["stops"] = stops
+            delete_stop(layer, item.row())
             self._refresh_all()
 
     def _on_stop_table_step_requested(self, layer: dict, table: QTableWidget, row: int, column: int, delta: int):
-        stops = list(layer.get("stops") or [])
-        if not (0 <= row < len(stops)):
+        if not step_stop(layer, row, column, delta, self._unit_name(), self._gradient_span(float(layer.get("deg", 90)))):
             return
-        if column == 2:
-            color_text, alpha_text = split_color_and_alpha(str(stops[row].get("color", "#ffffff")))
-            current_alpha = alpha_text[:-1] if alpha_text.endswith("%") else alpha_text
-            try:
-                alpha = float(current_alpha)
-            except ValueError:
-                alpha = 100.0
-            combined = combine_color_and_alpha(color_text, f"{max(0.0, min(100.0, alpha + delta))}%")
-            if combined is None:
-                return
-            stops[row]["color"] = combined
-        elif column == 3:
-            current = float(stops[row].get("position", 0.0))
-            if self._unit_name() == "px":
-                current = current + (delta / self._gradient_span(float(layer.get("deg", 90))))
-            else:
-                current = current + (delta / 100.0)
-            stops[row]["position"] = current
-        else:
-            return
-        layer["stops"] = stops
         self._refresh_all()
         current_item = table.item(row, column)
         if current_item is not None:
             table.setCurrentItem(current_item)
 
     def _on_stop_table_reorder_requested(self, layer: dict, source_row: int, target_row: int):
-        stops = list(layer.get("stops") or [])
-        if not (0 <= source_row < len(stops) and 0 <= target_row < len(stops)):
+        if not reorder_stop(layer, source_row, target_row):
             return
-        stop = stops.pop(source_row)
-        stops.insert(target_row, stop)
-        layer["stops"] = stops
         self._refresh_all()
         table = layer.get("_stop_table")
         if isinstance(table, QTableWidget):
@@ -628,29 +564,12 @@ class GradientWindow(QMainWindow):
                 table.setCurrentItem(target_item)
 
     def _on_stop_table_add_requested(self, layer: dict):
-        stops = list(layer.get("stops") or [])
-        if stops:
-            last_position = float(stops[-1].get("position", 0.0))
-            if self._unit_name() == "px":
-                increment = 1.0 / self._gradient_span(float(layer.get("deg", 90)))
-            else:
-                increment = 0.01
-            position = last_position + increment
-        else:
-            position = 0.0
-        stops.append({"color": self.selected_palette_color, "position": position, "muted": False})
-        layer["stops"] = stops
+        append_stop_after_last(layer, self.selected_palette_color, self._unit_name(), self._gradient_span(float(layer.get("deg", 90))))
         self._refresh_all()
 
     def _on_stop_table_color_dropped(self, layer: dict, row: int, color: str):
-        stops = list(layer.get("stops") or [])
-        if not (0 <= row < len(stops)):
+        if not set_stop_color(layer, row, color):
             return
-        parsed = parse_color_text(color)
-        if parsed is None:
-            return
-        stops[row]["color"] = parsed
-        layer["stops"] = stops
         self._refresh_all()
 
     def _refresh_active_table(self):
@@ -672,37 +591,30 @@ class GradientWindow(QMainWindow):
         layer = self._active_layer()
         if not layer or layer.get("kind") != "linear":
             return
-        layer.setdefault("stops", []).append({"color": self.selected_palette_color, "position": float(position), "muted": False})
+        append_stop(layer, self.selected_palette_color, position)
         self._refresh_all()
 
     def _move_stop_from_canvas(self, index: int, position: float):
         layer = self._active_layer()
         if not layer or layer.get("kind") != "linear":
             return
-        stops = list(layer.get("stops") or [])
-        if not (0 <= index < len(stops)):
+        if not move_stop(layer, index, position):
             return
-        stops[index]["position"] = float(position)
-        layer["stops"] = stops
         self._refresh_all()
 
     def _delete_stop_from_canvas(self, index: int):
         layer = self._active_layer()
         if not layer or layer.get("kind") != "linear":
             return
-        stops = list(layer.get("stops") or [])
-        if not (0 <= index < len(stops)):
+        if not delete_stop(layer, index):
             return
-        stops.pop(index)
-        layer["stops"] = stops
         self._refresh_all()
 
     def _gradient_css(self, layer: dict) -> str:
         kind = layer.get("kind")
         if kind == "linear":
             repeat_prefix = "repeating-" if layer.get("repeat") else ""
-            stops = self._visible_stops(layer)
-            stops_text = self._linear_stops_css(layer, stops)
+            stops_text = self._linear_stops_css(layer)
             return f"{repeat_prefix}linear-gradient({int(layer.get('deg', 90))}deg, {stops_text})"
         if kind == "radial":
             return "radial-gradient(/* pending */)"
@@ -729,6 +641,7 @@ class GradientWindow(QMainWindow):
         self._refresh_code()
         self.canvas.update()
         self._save_state()
+        self._record_undo_snapshot()
 
     def _on_ui_changed(self, *_):
         self._refresh_all()
@@ -775,27 +688,6 @@ class GradientWindow(QMainWindow):
         self.inspector_tabs.setCurrentIndex(max(0, min(index - 1, self.inspector_tabs.count() - 1)))
         self._refresh_all()
 
-    def _serialize_layers(self) -> list[dict]:
-        return [
-            {
-                "kind": layer.get("kind", "linear"),
-                "name": layer.get("name", "L"),
-                "deg": int(layer.get("deg", 90)),
-                "repeat": bool(layer.get("repeat", False)),
-                "muted": bool(layer.get("muted", False)),
-                "color": str(layer.get("color", "#00000000")),
-                "stops": [
-                    {
-                        "color": str(stop.get("color", "#ffffff")),
-                        "position": float(stop.get("position", 0.0)),
-                        "muted": bool(stop.get("muted", False)),
-                    }
-                    for stop in layer.get("stops") or []
-                ],
-            }
-            for layer in self.layers
-        ]
-
     def _restore_state(self):
         self.selected_palette_color = self.palette_colors[0]
         if not self.state_path or not self.state_path.exists():
@@ -827,73 +719,14 @@ class GradientWindow(QMainWindow):
         self.toolbar.unit_px.setChecked(unit == "px")
         self.toolbar.unit_percent.setChecked(unit != "px")
 
-        palette_state = state.get("palette_colors")
-        if isinstance(palette_state, list) and palette_state:
-            colors: list[str] = []
-            for color in palette_state:
-                parsed = self.parse_color_text(str(color))
-                colors.append(parsed if parsed is not None else "#00000000")
-            self.palette_colors = colors
-            self.palette.set_palette_colors(colors)
-        selected_palette = str(state.get("selected_palette_color", self.palette_colors[0]))
-        if selected_palette in self.palette.palette_colors:
-            self.selected_palette_color = selected_palette
-            self.palette.select_color(selected_palette)
-        else:
-            self.selected_palette_color = self.palette.palette_colors[0]
-            self.palette.select_index(0)
-
-        for item in state.get("layers", []):
-            if not isinstance(item, dict):
-                continue
-            kind = str(item.get("kind", "linear"))
-            default_name = "b" if kind == "background" else self._layer_default_name(kind)
-            self._add_layer(
-                kind,
-                {
-                    "kind": kind,
-                    "name": str(item.get("name", default_name)),
-                    "deg": int(item.get("deg", 90)),
-                    "repeat": bool(item.get("repeat", False)),
-                    "muted": bool(item.get("muted", False)),
-                    "color": parse_color_text(str(item.get("color", "#00000000"))) or "#00000000",
-                    "stops": [
-                        {
-                            "color": parse_color_text(str(stop.get("color", "#ffffff"))) or "#ffffff",
-                            "position": float(stop.get("position", 0.0)),
-                            "muted": bool(stop.get("muted", False)),
-                        }
-                        for stop in item.get("stops", [])
-                        if isinstance(stop, dict)
-                    ],
-                },
-            )
-
-        if not self.layers or self.layers[0].get("kind") != "background":
-            self.layers.insert(0, self._new_background_layer())
-            self._rebuild_inspector_tabs()
-        if self.inspector_tabs.count() > 0:
-            self.inspector_tabs.setCurrentIndex(max(0, min(int(state.get("active_tab", 0)), self.inspector_tabs.count() - 1)))
+        self._apply_palette_state(state.get("palette_colors"), state.get("selected_palette_color", self.palette_colors[0]))
+        self._apply_layers_state(state.get("layers", []), int(state.get("active_tab", 0)))
 
     def _save_state(self):
         if not self.state_path:
             return
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "size_h": self.toolbar.size_h.value(),
-            "size_w": self.toolbar.size_w.value(),
-            "unit": self._unit_name(),
-            "grid_value": self.toolbar.grid_input.value(),
-            "grid_enabled": self.toolbar.grid_check.isChecked(),
-            "guide_enabled": self.toolbar.guide_check.isChecked(),
-            "history_dialog_width": self._history_dialog_width,
-            "history_dialog_height": self._history_dialog_height,
-            "splitter_sizes": self.main_splitter.sizes(),
-            "selected_palette_color": self.selected_palette_color,
-            "palette_colors": self.palette.palette_colors,
-            "active_tab": self.inspector_tabs.currentIndex(),
-            "layers": self._serialize_layers(),
-        }
+        payload = self._state_payload(include_ui=True)
         self.state_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _reset_state(self):
@@ -994,6 +827,9 @@ class GradientWindow(QMainWindow):
         entries.insert(0, entry)
         self.history_path.write_text(json.dumps(entries[: self.MAX_HISTORY], ensure_ascii=False, indent=2), encoding="utf-8")
 
+    def _save_current_to_history(self):
+        self._save_history_entry(self.copy_feedback_base_text)
+
     def _on_code_clicked(self, _event):
         code = self.copy_feedback_base_text
         QApplication.clipboard().setText(code)
@@ -1008,110 +844,6 @@ class GradientWindow(QMainWindow):
             self._update_code_label_layout(reset_scroll=True)
 
         QTimer.singleShot(700, _restore)
-
-    def _build_history_preview_lines(self, text: str, width: int, max_lines: int, font_metrics: QFontMetrics) -> list[str]:
-        layout = QTextLayout(text, self.font())
-        lines: list[str] = []
-        layout.beginLayout()
-        while len(lines) < max_lines:
-            line = layout.createLine()
-            if not line.isValid():
-                break
-            line.setLineWidth(width)
-            start = int(line.textStart())
-            length = int(line.textLength())
-            part = text[start : start + length]
-            has_more = start + length < len(text)
-            if len(lines) == max_lines - 1 and has_more:
-                part = part.rstrip()
-                while part and font_metrics.horizontalAdvance(f"{part}...") > width:
-                    part = part[:-1]
-                lines.append(f"{part}..." if part else "...")
-                break
-            lines.append(part)
-        layout.endLayout()
-        return lines or [""]
-
-    def _history_preview_height(self, font_metrics: QFontMetrics, line_count: int) -> int:
-        return max(1, line_count) * font_metrics.lineSpacing()
-
-    def _history_preview_pixmap(self, entry: dict, size: QSize) -> QPixmap:
-        pixmap = QPixmap(size)
-        pixmap.fill(QColor("#20252e"))
-        painter = QPainter(pixmap)
-        rect = pixmap.rect()
-        layers = entry.get("layers") if isinstance(entry.get("layers"), list) else []
-        background_color = QColor("#20252e")
-        for layer in layers:
-            if isinstance(layer, dict) and layer.get("kind") == "background" and not layer.get("muted", False):
-                background_color = QColor(str(layer.get("color", "#20252e")))
-                break
-        painter.fillRect(rect, background_color)
-        guide_rect = rect.adjusted(8, 8, -8, -8)
-        painter.fillRect(guide_rect, QColor("#1f2330"))
-
-        def gradient_direction(deg: float) -> QPointF:
-            rad = math.radians(deg)
-            return QPointF(math.sin(rad), -math.cos(rad))
-
-        def gradient_half_span(target_rect: QRectF, direction: QPointF) -> float:
-            return abs(direction.x()) * target_rect.width() / 2.0 + abs(direction.y()) * target_rect.height() / 2.0
-
-        def position_to_point(target_rect: QRectF, position: float, deg: float) -> QPointF:
-            direction = gradient_direction(deg)
-            center = QPointF(target_rect.center().x(), target_rect.center().y())
-            half_span = gradient_half_span(target_rect, direction)
-            scale = (position * 2.0) - 1.0
-            return QPointF(center.x() + direction.x() * half_span * scale, center.y() + direction.y() * half_span * scale)
-
-        def project_to_position(target_rect: QRectF, point: QPointF, deg: float) -> float:
-            direction = gradient_direction(deg)
-            center = QPointF(target_rect.center().x(), target_rect.center().y())
-            half_span = max(1e-6, gradient_half_span(target_rect, direction))
-            projected = ((point.x() - center.x()) * direction.x()) + ((point.y() - center.y()) * direction.y())
-            return (projected / half_span + 1.0) / 2.0
-
-        def position_range_for_rect(target_rect: QRectF, deg: float) -> tuple[float, float]:
-            corners = (
-                target_rect.topLeft(),
-                target_rect.topRight(),
-                target_rect.bottomLeft(),
-                target_rect.bottomRight(),
-            )
-            positions = [project_to_position(target_rect, corner, deg) for corner in corners]
-            return min(positions), max(positions)
-
-        for layer in layers:
-            if not isinstance(layer, dict) or layer.get("muted", False) or layer.get("kind") != "linear":
-                continue
-            deg = float(layer.get("deg", 90))
-            direction = gradient_direction(deg)
-            guide_rect_f = QRectF(guide_rect)
-            min_position, max_position = position_range_for_rect(guide_rect_f, deg)
-            start_point = position_to_point(guide_rect_f, min_position, deg)
-            end_point = position_to_point(guide_rect_f, max_position, deg)
-            center = QPointF((start_point.x() + end_point.x()) / 2.0, (start_point.y() + end_point.y()) / 2.0)
-            half_span = math.hypot(end_point.x() - start_point.x(), end_point.y() - start_point.y()) / 2.0
-            thickness = max(1.0, math.hypot(guide_rect.width(), guide_rect.height()) * 2.0)
-            sample_count = max(256, int(math.ceil(half_span * 2.0)))
-            axis_aligned = self.canvas._axis_aligned_deg(deg)
-            if axis_aligned in (90.0, 270.0):
-                strip = self.canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=False)
-                painter.drawImage(QRectF(center.x() - half_span, center.y() - thickness / 2.0, half_span * 2.0, thickness), strip, QRectF(0.0, 0.0, float(strip.width()), 1.0))
-            elif axis_aligned in (0.0, 180.0):
-                strip = self.canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=True)
-                painter.drawImage(QRectF(center.x() - thickness / 2.0, center.y() - half_span, thickness, half_span * 2.0), strip, QRectF(0.0, 0.0, 1.0, float(strip.height())))
-            else:
-                strip = self.canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=False)
-                painter.save()
-                painter.translate(center)
-                painter.rotate(deg - 90.0)
-                painter.drawImage(QRectF(-half_span, -thickness / 2.0, half_span * 2.0, thickness), strip, QRectF(0.0, 0.0, float(strip.width()), 1.0))
-                painter.restore()
-        painter.setPen(QColor("#69738a"))
-        painter.drawRect(guide_rect)
-        painter.end()
-        return pixmap
 
     def _show_history_dialog(self):
         items = self._load_history_entries()
@@ -1134,7 +866,7 @@ class GradientWindow(QMainWindow):
             item = QListWidgetItem()
             item.setData(Qt.UserRole, entry)
             lst.addItem(item)
-            widget = GradientHistoryItemWidget(self._history_preview_pixmap(entry, preview_size), code)
+            widget = GradientHistoryItemWidget(render_history_preview_pixmap(entry, preview_size, self.canvas), code)
             row_widgets[id(item)] = widget
             lst.setItemWidget(item, widget)
         layout.addWidget(lst)
@@ -1147,10 +879,10 @@ class GradientWindow(QMainWindow):
                 widget = row_widgets.get(id(item))
                 if widget is None:
                     continue
-                preview_lines = self._build_history_preview_lines(widget.base_code_text, code_width, 3, metrics)
+                preview_lines = build_history_preview_lines(widget.base_code_text, code_width, 3, lst.font(), metrics)
                 widget.set_text_width(code_width)
                 widget.set_preview_lines(preview_lines)
-                code_height = self._history_preview_height(metrics, widget.line_count())
+                code_height = history_preview_height(metrics, widget.line_count())
                 item.setSizeHint(QSize(lst.viewport().width(), max(preview_size.height(), code_height) + 16))
 
         def resize_event(event):

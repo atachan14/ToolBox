@@ -176,7 +176,7 @@ def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_re
     layout.addWidget(controls)
 
     table = StopTableWidget(0, 4)
-    table.setHorizontalHeaderLabels(["", "color", "a", "value"])
+    table.setHorizontalHeaderLabels(["", "color", "a", "stop"])
     table.verticalHeader().setVisible(False)
     table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
     table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)

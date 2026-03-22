@@ -24,6 +24,8 @@ class GradientCanvasConfig:
     linear_stop_clicked: Callable[[float], None]
     linear_stop_moved: Callable[[int, float], None]
     linear_stop_deleted: Callable[[int], None]
+    interaction_started: Callable[[], None]
+    interaction_finished: Callable[[], None]
 
 
 class GradientCanvas(QWidget):
@@ -69,12 +71,6 @@ class GradientCanvas(QWidget):
     def _guide_rect_screen(self) -> QRectF:
         rect = self._guide_rect_scene()
         return QRectF(self._scene_to_screen(rect.topLeft()), self._scene_to_screen(rect.bottomRight())).normalized()
-
-    def _visible_scene_rect(self) -> QRectF:
-        return QRectF(
-            self._screen_to_scene(QPointF(0.0, 0.0)),
-            self._screen_to_scene(QPointF(float(self.width()), float(self.height()))),
-        ).normalized()
 
     def _grid_steps_normalized(self, grid_value: int) -> tuple[float, float]:
         size_w, size_h, unit = self.config.size_getter()
@@ -271,6 +267,7 @@ class GradientCanvas(QWidget):
             hit_index = self._find_hit_stop_index(active_layer, scene_pos)
             if hit_index is not None:
                 self._dragging_stop_index = hit_index
+                self.config.interaction_started()
                 return
             deg = float(active_layer.get("deg", 90))
             self._pending_add_position = self._snap_position(self._project_point_to_position(scene_pos, deg), deg)
@@ -351,6 +348,7 @@ class GradientCanvas(QWidget):
             self._dragging_stop_index = None
             self._hover_position = None
             self.config.linear_stop_hovered(None)
+            self.config.interaction_finished()
             self.update()
             return
         if self._pending_add_position is not None:
@@ -387,21 +385,18 @@ class GradientCanvas(QWidget):
 
         guide_scene = self._guide_rect_scene()
         guide_screen = self._guide_rect_screen()
-        visible_scene = self._visible_scene_rect()
-
         painter.save()
         painter.setClipRect(guide_screen)
         painter.scale(self.zoom, self.zoom)
         painter.translate(self.pan.x() / self.zoom, self.pan.y() / self.zoom)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, False)
-        painter.fillRect(guide_scene, QColor("#1f2330"))
+        painter.fillRect(guide_scene, self._background_color())
         for layer in self.config.layers_getter():
             if layer.get("muted", False):
                 continue
             kind = layer.get("kind")
             if kind == "linear":
                 deg = float(layer.get("deg", 90))
-                direction = self._gradient_direction(deg)
                 min_position, max_position = self._position_range_for_scene_rect(guide_scene, deg)
                 start_point = self._position_to_scene(min_position, deg)
                 end_point = self._position_to_scene(max_position, deg)
