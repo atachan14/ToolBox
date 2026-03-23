@@ -10,6 +10,7 @@ class ToolBase(QWidget):
     TOOL_DEFAULT_LABEL = "Tool"
     TOOL_ORDER = 100
     TAB_FILES = []
+    HELP_ENTRY = "help/index.md"
 
     def __init__(self, tab_dir=None, tool_data_dir=None):
         super().__init__()
@@ -41,3 +42,19 @@ class ToolBase(QWidget):
             json.dumps(data, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    @classmethod
+    def get_tool_dir(cls):
+        return Path(__file__).resolve().parent.parent / "tools" / cls.TOOL_NAME.replace("-", "_")
+
+    @classmethod
+    def get_help_path(cls):
+        entry = getattr(cls, "HELP_ENTRY", None)
+        if not entry:
+            return None
+        return cls.get_tool_dir() / entry
+
+    @classmethod
+    def has_help(cls):
+        path = cls.get_help_path()
+        return path is not None and path.exists()

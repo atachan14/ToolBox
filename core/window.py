@@ -21,6 +21,7 @@ from PySide6.QtCore import QEvent, QSettings, Qt, QTimer, Signal
 import win32gui
 import win32con
 from core.flow_layout import FlowLayout
+from core.help import HelpWindow
 from core.migration import migrate_user_data
 from core.plus_tab import PlusTab
 from core.tool_loader import load_tools
@@ -153,6 +154,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         
         self.always_on_top = False
+        self.help_windows = {}
         QShortcut(QKeySequence("Alt+W"), self, self.toggle_always_on_top)
         QShortcut(QKeySequence("F2"), self, self.rename_current_hover_tab)
 
@@ -412,7 +414,34 @@ class MainWindow(QMainWindow):
             """)
         else:
             self.wrapper.setStyleSheet("")
-                
+
+    def open_help_for_tab(self, index):
+        widget = self.tabs.widget(index)
+        if widget is None or not hasattr(widget.__class__, "has_help"):
+            return
+
+        tool_class = widget.__class__
+        help_path = tool_class.get_help_path()
+        if help_path is None or not help_path.exists():
+            QMessageBox.information(self, "Help", "Help is not available.")
+            return
+
+        tool_name = tool_class.TOOL_NAME
+        title = f"{tool_class.TOOL_DEFAULT_LABEL} Help"
+        window = self.help_windows.get(tool_name)
+
+        if window is None:
+            window = HelpWindow(title, help_path, self)
+            window.destroyed.connect(lambda *_, name=tool_name: self.help_windows.pop(name, None))
+            self.help_windows[tool_name] = window
+        else:
+            window.setWindowTitle(title)
+            window.reload()
+
+        window.show()
+        window.raise_()
+        window.activateWindow()
+                 
 class WrappedTabButton(QWidget):
 
     clicked = Signal()
@@ -787,22 +816,29 @@ class FixedTabBar(QWidget):
     def _show_context_menu(self, button, global_pos):
         index = self._buttons.index(button)
         menu = QMenu(self)
+        window = self.window()
 
         if self.tabText(index) == "+":
             restore = menu.addAction("閉じたタブを復元")
             action = menu.exec(global_pos)
             if action == restore:
-                self.window().restore_closed_tab()
+                window.restore_closed_tab()
             return
 
+        help_action = None
+        tab_widget = window.tabs.widget(index) if hasattr(window, "tabs") else None
+        if tab_widget is not None and tab_widget.__class__.has_help():
+            help_action = menu.addAction(f"{tab_widget.__class__.TOOL_DEFAULT_LABEL} Help")
         rename = menu.addAction("Rename")
         close = menu.addAction("Close")
         action = menu.exec(global_pos)
 
+        if action == help_action:
+            window.open_help_for_tab(index)
         if action == rename:
-            self.window().rename_tab(index)
+            window.rename_tab(index)
         if action == close:
-            self.window().close_tab(index)
+            window.close_tab(index)
 
 
 class WrappedTabWidget(QWidget):
@@ -860,6 +896,9 @@ class WrappedTabWidget(QWidget):
 
     def indexOf(self, widget):
         return self._stack.indexOf(widget)
+
+    def widget(self, index):
+        return self._stack.widget(index)
 
     def setCurrentIndex(self, index):
         self._tab_bar.setCurrentIndex(index)
