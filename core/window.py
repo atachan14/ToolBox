@@ -419,8 +419,9 @@ class MainWindow(QMainWindow):
         widget = self.tabs.widget(index)
         if widget is None or not hasattr(widget.__class__, "has_help"):
             return
+        self.open_help_for_tool(widget.__class__)
 
-        tool_class = widget.__class__
+    def open_help_for_tool(self, tool_class):
         help_path = tool_class.get_help_path()
         if help_path is None or not help_path.exists():
             QMessageBox.information(self, "Help", "Help is not available.")

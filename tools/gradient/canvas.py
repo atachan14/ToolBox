@@ -292,7 +292,11 @@ class GradientCanvas(QWidget):
         guide = self._guide_rect_scene()
         x_n = (scene_pos.x() - guide.x()) / guide.width()
         y_n = (scene_pos.y() - guide.y()) / guide.height()
-        self.config.cursor_changed(f"Cursor: x={x_n * 100:.2f}%, y={y_n * 100:.2f}%")
+        size_w, size_h, unit = self.config.size_getter()
+        if unit == "px":
+            self.config.cursor_changed(f"Cursor: x={x_n * size_w:.1f}px, y={y_n * size_h:.1f}px")
+        else:
+            self.config.cursor_changed(f"Cursor: x={x_n * 100:.2f}%, y={y_n * 100:.2f}%")
         active_layer = self.config.active_layer_getter()
         if active_layer and not active_layer.get("muted", False) and active_layer.get("kind") == "linear":
             deg = float(active_layer.get("deg", 90))

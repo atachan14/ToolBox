@@ -230,11 +230,26 @@ class GradientWindow(QMainWindow):
     def _set_cursor_text(self, text: str):
         self.footer.set_cursor_text(text)
 
+    def _default_cursor_text(self) -> str:
+        size_w, size_h, unit = self._get_size()
+        if unit == "px":
+            return f"Cursor: x={0.0:.1f}px, y={0.0:.1f}px"
+        return "Cursor: x=0.00%, y=0.00%"
+
+    def _refresh_cursor_text(self):
+        layer = self._active_layer()
+        if self._hover_position is not None and layer and layer.get("kind") == "linear":
+            self.footer.set_cursor_text(f"Cursor: stop={self._format_stop_value(layer, self._hover_position)}")
+            return
+        self.footer.set_cursor_text(self._default_cursor_text())
+
     def _set_hover_position(self, position: float | None):
         self._hover_position = position
         layer = self._active_layer()
         if position is not None and layer and layer.get("kind") == "linear":
-            self.footer.set_cursor_text(f"Cursor: value={self._format_stop_value(layer, position)}")
+            self.footer.set_cursor_text(f"Cursor: stop={self._format_stop_value(layer, position)}")
+        elif position is None:
+            self._refresh_cursor_text()
         self._refresh_active_table()
 
     def _on_palette_selected(self, color: str):
@@ -674,6 +689,7 @@ class GradientWindow(QMainWindow):
         self._record_undo_snapshot()
 
     def _on_ui_changed(self, *_):
+        self._refresh_cursor_text()
         self._refresh_all()
 
     def _on_tab_changed(self, *_):
@@ -770,7 +786,7 @@ class GradientWindow(QMainWindow):
         self.layers = []
         self.inspector_tabs.clear()
         self._add_layer("background", self._new_background_layer())
-        self._set_cursor_text("Cursor: x=0.00%, y=0.00%")
+        self._set_cursor_text(self._default_cursor_text())
         self._refresh_all()
 
     def resizeEvent(self, event: QResizeEvent):
