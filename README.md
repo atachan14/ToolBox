@@ -5,7 +5,10 @@ Windows 向けの PySide6 製ユーティリティ集です。
 
 ## Screenshot
 
-![スクリーンショット](readmeSS.png)
+![plus](images/readme/plus.png)
+![plus](images/readme/clamp.png)
+![plus](images/readme/gradient.png)
+
 
 ## 使用方法
 
