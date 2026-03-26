@@ -25,6 +25,7 @@ class SectionMarkdownView(QTextBrowser):
         self.setFrameShape(QTextBrowser.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.document().setBaseUrl(QUrl.fromLocalFile(str(markdown_path.parent.resolve()) + "/"))
         self.anchorClicked.connect(self._on_anchor_clicked)
@@ -58,6 +59,8 @@ class SectionWidget(QWidget):
     def __init__(self, markdown_path: Path, section: HelpSection, parent=None):
         super().__init__(parent)
         self.section = section
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
         layout = QVBoxLayout(self)
         has_body = bool((section.body_markdown or "").strip())
@@ -65,6 +68,9 @@ class SectionWidget(QWidget):
         layout.setSpacing(6)
 
         title = QLabel(section.title)
+        title.setWordWrap(True)
+        title.setMinimumWidth(0)
+        title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         title.setTextInteractionFlags(Qt.TextSelectableByMouse)
         title.setStyleSheet(
             f"""
@@ -95,8 +101,11 @@ class HelpContentView(QScrollArea):
 
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setMinimumWidth(0)
 
         self.container = QWidget()
+        self.container.setMinimumWidth(0)
+        self.container.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.container_layout = QVBoxLayout(self.container)
         self.container_layout.setContentsMargins(12, 12, 12, 12)
         self.container_layout.setSpacing(4)

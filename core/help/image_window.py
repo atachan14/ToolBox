@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
@@ -15,18 +15,26 @@ class _ImageItem(QWidget):
         self.path = path
         self._pixmap = QPixmap(str(path))
         self._viewport_size = QSize(400, 500)
+        self._base_style = "background: transparent; border: 1px solid transparent; border-radius: 6px;"
+        self._flash_style = "background: rgba(78, 205, 196, 0.18); border: 1px solid #4ecdc4; border-radius: 6px;"
+        self._selected = False
+        self.setStyleSheet(self._base_style)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
 
         title = QLabel(path.name)
+        title.setWordWrap(True)
+        title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         title.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(title)
 
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.image_label.setMinimumWidth(0)
         layout.addWidget(self.image_label)
 
         if self._pixmap.isNull():
@@ -43,23 +51,29 @@ class _ImageItem(QWidget):
         if self._pixmap.isNull():
             return
         available = QSize(
-            max(1, self._viewport_size.width() - 16),
-            max(1, self._viewport_size.height() - 44),
+            max(1, self._viewport_size.width() - 32),
+            max(1, self._viewport_size.height() - 64),
         )
         scaled = self._pixmap.scaled(available, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.image_label.setPixmap(scaled)
         self.image_label.setFixedSize(scaled.size())
+        self.setMinimumWidth(0)
         self.setMinimumHeight(scaled.height() + 46)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_pixmap()
 
+    def set_selected(self, selected: bool):
+        self._selected = bool(selected)
+        self.setStyleSheet(self._flash_style if self._selected else self._base_style)
+
 
 class HelpImageWindow(QWidget):
     def __init__(self, title: str, parent=None):
         super().__init__(parent, Qt.Window)
         self._items: dict[Path, QWidget] = {}
+        self._selected_path: Path | None = None
         self.setWindowTitle(title)
         self.resize(420, 420)
 
@@ -68,7 +82,11 @@ class HelpImageWindow(QWidget):
 
         self.scroll = QScrollArea(self)
         self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         layout.addWidget(self.scroll)
+        self._scroll_animation = QPropertyAnimation(self.scroll.verticalScrollBar(), b"value", self)
+        self._scroll_animation.setDuration(240)
+        self._scroll_animation.setEasingCurve(QEasingCurve.OutCubic)
 
         self.container = QWidget()
         self.container_layout = QVBoxLayout(self.container)
@@ -85,6 +103,7 @@ class HelpImageWindow(QWidget):
                 widget.deleteLater()
 
         self._items = {}
+        self._selected_path = None
         if not document.images:
             empty = QLabel("No images referenced in this help.")
             empty.setAlignment(Qt.AlignCenter)
@@ -108,7 +127,23 @@ class HelpImageWindow(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
-        self.scroll.ensureWidgetVisible(item, 0, 12)
+        self._set_selected_item(path.resolve())
+        bar = self.scroll.verticalScrollBar()
+        current = bar.value()
+        target = max(0, item.y())
+        self._scroll_animation.stop()
+        self._scroll_animation.setStartValue(current)
+        self._scroll_animation.setEndValue(target)
+        self._scroll_animation.start()
+
+    def _set_selected_item(self, path: Path):
+        previous = self._items.get(self._selected_path) if self._selected_path is not None else None
+        if isinstance(previous, _ImageItem):
+            previous.set_selected(False)
+        self._selected_path = path
+        current = self._items.get(path)
+        if isinstance(current, _ImageItem):
+            current.set_selected(True)
 
     def _apply_viewport_size_to_items(self):
         viewport_size = self.scroll.viewport().size()

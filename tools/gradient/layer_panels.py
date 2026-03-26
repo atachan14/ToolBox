@@ -22,7 +22,7 @@ class StopTableWidget(QTableWidget):
 
     def keyPressEvent(self, event):
         item = self.currentItem()
-        if item is not None and item.column() in (2, 3):
+        if item is not None and item.column() in (1, 2):
             if event.key() == Qt.Key_Up:
                 self.stepRequested.emit(item.row(), item.column(), 1)
                 event.accept()
@@ -35,7 +35,7 @@ class StopTableWidget(QTableWidget):
 
     def mousePressEvent(self, event):
         item = self.itemAt(event.position().toPoint())
-        if item and item.column() == 0 and event.button() == Qt.LeftButton:
+        if item and event.button() == Qt.LeftButton and item.row() < self.rowCount() - 1:
             self._drag_row = item.row()
             self._press_pos = event.position().toPoint()
             self._drag_active = True
@@ -82,7 +82,7 @@ class StopTableWidget(QTableWidget):
                     event.acceptProposedAction()
                     return True
                 index = self.indexAt(event.position().toPoint())
-                if index.isValid() and index.column() == 1:
+                if index.isValid() and index.column() == 0:
                     if event.type() == QEvent.Drop:
                         color = bytes(mime.data("application/x-gradient-color")).decode("utf-8").strip()
                         if color:
@@ -183,8 +183,8 @@ def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_re
     controls = QFrame()
     controls.setFrameShape(QFrame.StyledPanel)
     controls_layout = QHBoxLayout(controls)
-    controls_layout.setContentsMargins(10, 10, 10, 10)
-    controls_layout.setSpacing(8)
+    controls_layout.setContentsMargins(8, 8, 8, 8)
+    controls_layout.setSpacing(4)
     controls_layout.addWidget(QLabel("deg"))
     deg_input = QSpinBox()
     deg_input.setRange(0, 360)
@@ -199,17 +199,15 @@ def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_re
     controls_layout.addWidget(repeat_check)
     layout.addWidget(controls)
 
-    table = StopTableWidget(0, 4)
-    table.setHorizontalHeaderLabels(["", "color", "a", "stop"])
+    table = StopTableWidget(0, 3)
+    table.setHorizontalHeaderLabels(["color", "alpha", "stop"])
     table.verticalHeader().setVisible(False)
     table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
     table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
     table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
-    table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
-    table.setColumnWidth(0, 4)
-    table.setColumnWidth(1, 56)
-    table.setColumnWidth(2, 44)
-    table.setColumnWidth(3, 48)
+    table.setColumnWidth(0, 52)
+    table.setColumnWidth(1, 48)
+    table.setColumnWidth(2, 52)
     table.setSelectionMode(QAbstractItemView.NoSelection)
     table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
     table.setAcceptDrops(True)
@@ -233,32 +231,32 @@ def populate_linear_stop_table(table: QTableWidget, layer: dict, format_stop_val
     table.clearSpans()
     table.setRowCount(len(stops) + 1)
     for row, stop in enumerate(stops):
-        index_item = QTableWidgetItem("::")
         color_text, alpha_text = split_color_and_alpha(str(stop.get("color", "")))
         color_item = QTableWidgetItem(color_text)
         alpha_item = QTableWidgetItem(alpha_text)
         value_item = QTableWidgetItem(format_stop_value(layer, float(stop.get("position", 0.0))))
+        color_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        alpha_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        value_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
         muted = bool(stop.get("muted", False))
-        index_item.setFlags(index_item.flags() & ~Qt.ItemIsEditable)
         if muted:
             muted_bg = QBrush(QColor("#343841"))
             muted_fg = QBrush(QColor("#8a93a5"))
-            for item in (index_item, color_item, alpha_item, value_item):
+            for item in (color_item, alpha_item, value_item):
                 item.setBackground(muted_bg)
                 item.setForeground(muted_fg)
         else:
             color_value = str(stop.get("color", "#ffffff"))
             color_item.setBackground(QColor(color_value))
             color_item.setForeground(QBrush(QColor(alpha_pattern_text_color(color_value))))
-        table.setItem(row, 0, index_item)
-        table.setItem(row, 1, color_item)
-        table.setItem(row, 2, alpha_item)
-        table.setItem(row, 3, value_item)
+        table.setItem(row, 0, color_item)
+        table.setItem(row, 1, alpha_item)
+        table.setItem(row, 2, value_item)
     add_row = len(stops)
     add_item = QTableWidgetItem("追加")
     add_item.setFlags((add_item.flags() & ~Qt.ItemIsEditable) & ~Qt.ItemIsSelectable)
     add_item.setTextAlignment(Qt.AlignCenter)
-    table.setSpan(add_row, 0, 1, 4)
+    table.setSpan(add_row, 0, 1, 3)
     table.setItem(add_row, 0, add_item)
     table.setRowHeight(add_row, 24)
     table.blockSignals(False)

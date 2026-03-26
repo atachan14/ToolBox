@@ -41,12 +41,12 @@ def update_stop_from_table(layer: dict, row: int, column: int, color_text: str, 
     stops = list(layer.get("stops") or [])
     if not (0 <= row < len(stops)):
         return False
-    if column == 3:
+    if column == 2:
         parsed = parse_stop_value(layer, value_text)
         if parsed is None:
             return False
         stops[row]["position"] = parsed
-    elif column in (1, 2):
+    elif column in (0, 1):
         combined = combine_color_and_alpha(color_text, alpha_text)
         if combined is None:
             return False
@@ -61,7 +61,7 @@ def step_stop(layer: dict, row: int, column: int, delta: int, unit_name: str, gr
     stops = list(layer.get("stops") or [])
     if not (0 <= row < len(stops)):
         return False
-    if column == 2:
+    if column == 1:
         color_text, alpha_text = split_color_and_alpha(str(stops[row].get("color", "#ffffff")))
         current_alpha = alpha_text[:-1] if alpha_text.endswith("%") else alpha_text
         try:
@@ -72,7 +72,7 @@ def step_stop(layer: dict, row: int, column: int, delta: int, unit_name: str, gr
         if combined is None:
             return False
         stops[row]["color"] = combined
-    elif column == 3:
+    elif column == 2:
         current = float(stops[row].get("position", 0.0))
         if unit_name == "px":
             current = current + (delta / gradient_span)

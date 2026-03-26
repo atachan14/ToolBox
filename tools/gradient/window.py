@@ -152,7 +152,7 @@ class GradientWindow(QMainWindow):
 
         self.main_splitter.addWidget(right)
         left.setMinimumWidth(1)
-        right.setFixedWidth(200)
+        right.setFixedWidth(180)
         self.main_splitter.setSizes([200, 200])
 
         self.footer = GradientFooter(self._on_code_clicked, self._on_code_wheel)
@@ -540,9 +540,9 @@ class GradientWindow(QMainWindow):
     def _on_stop_table_item_changed(self, layer: dict, table: QTableWidget, item: QTableWidgetItem):
         if self._table_syncing:
             return
-        color_item = table.item(item.row(), 1)
-        alpha_item = table.item(item.row(), 2)
-        value_item = table.item(item.row(), 3)
+        color_item = table.item(item.row(), 0)
+        alpha_item = table.item(item.row(), 1)
+        value_item = table.item(item.row(), 2)
         if color_item is None or alpha_item is None or value_item is None:
             self._populate_stop_table(table, layer)
             return
@@ -604,7 +604,7 @@ class GradientWindow(QMainWindow):
         self._refresh_all()
         table = layer.get("_stop_table")
         if isinstance(table, QTableWidget):
-            target_item = table.item(target_row, 1) or table.item(target_row, 0)
+            target_item = table.item(target_row, 0)
             if target_item is not None:
                 table.setCurrentItem(target_item)
 
