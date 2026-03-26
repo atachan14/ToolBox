@@ -1,4 +1,4 @@
-# MarkDown Help
+# MarkDown Help（AI生成）
 
 タブごとに `file.md` を保持する、シンプルな Markdown エディタです。
 

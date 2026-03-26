@@ -10,13 +10,27 @@ def get_base_dir():
     return Path(__file__).resolve().parent.parent
 
 
+def get_resource_dir():
+
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+
+    return get_base_dir()
+
+
 BASE_DIR = get_base_dir()
+RESOURCE_DIR = get_resource_dir()
 
 USERS_DIR = BASE_DIR / "Users"
 TABS_DIR = USERS_DIR / "Tabs"
 TOOL_DATA_DIR = USERS_DIR / "ToolData"
 TRASH_TABS_DIR = USERS_DIR / "TrashTabs"
 LEGACY_TABS_DIR = BASE_DIR / "tabs"
+
+
+def resource_path(*parts: str) -> Path:
+
+    return RESOURCE_DIR.joinpath(*parts)
 
 USERS_DIR.mkdir(exist_ok=True)
 TABS_DIR.mkdir(parents=True, exist_ok=True)

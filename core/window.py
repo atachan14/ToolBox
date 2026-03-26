@@ -18,8 +18,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPalette, QPen, QShortcut
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer, Signal
-import win32gui
-import win32con
+import sys
 from core.flow_layout import FlowLayout
 from core.help import HelpWindow
 from core.migration import migrate_user_data
@@ -37,6 +36,12 @@ from core.tab_storage import (
     restore_tab_from_trash,
     save_tab_meta,
 )
+
+IS_WINDOWS = sys.platform.startswith("win")
+
+if IS_WINDOWS:
+    import win32con
+    import win32gui
 
 
 def _mix_colors(base, overlay, ratio):
@@ -388,22 +393,26 @@ class MainWindow(QMainWindow):
     def toggle_always_on_top(self):
         self.always_on_top = not self.always_on_top
 
-        hwnd = int(self.winId())
+        if IS_WINDOWS:
+            hwnd = int(self.winId())
 
-        if self.always_on_top:
-            win32gui.SetWindowPos(
-                hwnd,
-                win32con.HWND_TOPMOST,
-                0, 0, 0, 0,
-                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
-            )
+            if self.always_on_top:
+                win32gui.SetWindowPos(
+                    hwnd,
+                    win32con.HWND_TOPMOST,
+                    0, 0, 0, 0,
+                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+                )
+            else:
+                win32gui.SetWindowPos(
+                    hwnd,
+                    win32con.HWND_NOTOPMOST,
+                    0, 0, 0, 0,
+                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+                )
         else:
-            win32gui.SetWindowPos(
-                hwnd,
-                win32con.HWND_NOTOPMOST,
-                0, 0, 0, 0,
-                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
-            )
+            self.setWindowFlag(Qt.WindowStaysOnTopHint, self.always_on_top)
+            self.show()
 
         # 見た目更新（今までのやつそのまま使える）
         if self.always_on_top:

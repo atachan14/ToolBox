@@ -1,4 +1,4 @@
-# ClipBoard Help
+# ClipBoard Help（AI生成）
 
 ClipBoard は List ごとに item と text を保持して、クリックで個別コピーできるツールです。
 

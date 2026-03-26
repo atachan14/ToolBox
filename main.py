@@ -3,6 +3,7 @@ import os
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QIcon
 
+from core.paths import resource_path
 from core.window import MainWindow
 from core.update import (
     check_update,
@@ -11,7 +12,6 @@ from core.update import (
     launch_updater
 )
 
-from pathlib import Path
 import ctypes
 import time
 
@@ -21,14 +21,14 @@ def main():
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("toolbox.app")
 
     app = QApplication(sys.argv)
-    
-    qss_path = Path(__file__).parent / "toolbox.qss"
+
+    qss_path = resource_path("toolbox.qss")
 
     with open(qss_path, encoding="utf-8") as f:
         app.setStyleSheet(f.read())
 
 
-    icon_path = Path(__file__).parent / "toolbox.ico"
+    icon_path = resource_path("toolbox.ico")
     icon = QIcon(str(icon_path))
 
     app.setWindowIcon(icon)
