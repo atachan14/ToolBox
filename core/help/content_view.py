@@ -60,7 +60,8 @@ class SectionWidget(QWidget):
         self.section = section
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 14)
+        has_body = bool((section.body_markdown or "").strip())
+        layout.setContentsMargins(0, 0, 0, 14 if has_body else 6)
         layout.setSpacing(6)
 
         title = QLabel(section.title)
@@ -74,9 +75,11 @@ class SectionWidget(QWidget):
         )
         layout.addWidget(title)
 
-        self.body_view = SectionMarkdownView(markdown_path, section, self)
-        self.body_view.imageLinkClicked.connect(self.imageLinkClicked.emit)
-        layout.addWidget(self.body_view)
+        self.body_view = None
+        if has_body:
+            self.body_view = SectionMarkdownView(markdown_path, section, self)
+            self.body_view.imageLinkClicked.connect(self.imageLinkClicked.emit)
+            layout.addWidget(self.body_view)
 
 
 class HelpContentView(QScrollArea):
