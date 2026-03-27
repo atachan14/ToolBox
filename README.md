@@ -29,7 +29,7 @@ Gradientタブ
 
 ## 使用方法
 
-1. Releasesから最新版をダウンロードし、zipを解凍してください。
+1. [Releases](https://github.com/atachan14/ToolBox/releases)から最新版をダウンロードし、zipを解凍してください。
 2. 中に入っているToolBox.exeを起動してください。
 
 注記:
