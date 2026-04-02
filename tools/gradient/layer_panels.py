@@ -174,7 +174,7 @@ def build_background_inspector(layer: dict, on_item_changed, on_context_requeste
     return panel
 
 
-def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_repeat_changed, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped) -> QWidget:
+def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_repeat_changed, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped, column_widths, on_column_resized) -> QWidget:
     panel = QWidget()
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(8, 8, 8, 8)
@@ -202,12 +202,12 @@ def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_re
     table = StopTableWidget(0, 3)
     table.setHorizontalHeaderLabels(["color", "alpha", "stop"])
     table.verticalHeader().setVisible(False)
-    table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-    table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
-    table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
-    table.setColumnWidth(0, 52)
-    table.setColumnWidth(1, 48)
-    table.setColumnWidth(2, 52)
+    table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
+    table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
+    table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Interactive)
+    table.horizontalHeader().setMinimumSectionSize(36)
+    for index, width in enumerate(column_widths):
+        table.setColumnWidth(index, width)
     table.setSelectionMode(QAbstractItemView.NoSelection)
     table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
     table.setAcceptDrops(True)
@@ -218,6 +218,7 @@ def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_re
     table.stepRequested.connect(lambda row, column, delta, owner=layer, widget=table: on_step_requested(owner, widget, row, column, delta))
     table.rowReordered.connect(lambda source, target, owner=layer: on_reorder_requested(owner, source, target))
     table.colorDropped.connect(lambda row, color, owner=layer: on_color_dropped(owner, row, color))
+    table.horizontalHeader().sectionResized.connect(lambda section, _old, new, widget=table: on_column_resized(widget, section, new))
     populate_linear_stop_table(table, layer, format_stop_value)
     table.cellClicked.connect(lambda row, _column, owner=layer, widget=table: on_add_requested(owner) if row == widget.rowCount() - 1 else None)
     layout.addWidget(table, 1)

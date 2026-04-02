@@ -53,6 +53,7 @@ class GradientWindow(QMainWindow):
         self.copy_feedback_base_text = ""
         self._history_dialog_width = self.DEFAULT_HISTORY_DIALOG_WIDTH
         self._history_dialog_height = self.DEFAULT_HISTORY_DIALOG_HEIGHT
+        self._stop_table_column_widths = [52, 48, 52]
         self._undo_stack: list[dict] = []
         self._redo_stack: list[dict] = []
         self._applying_undo_redo = False
@@ -152,7 +153,8 @@ class GradientWindow(QMainWindow):
 
         self.main_splitter.addWidget(right)
         left.setMinimumWidth(1)
-        right.setFixedWidth(180)
+        right.setMinimumWidth(180)
+        right.setMaximumWidth(16777215)
         self.main_splitter.setSizes([200, 200])
 
         self.footer = GradientFooter(self._on_code_clicked, self._on_code_wheel)
@@ -386,6 +388,7 @@ class GradientWindow(QMainWindow):
             "selected_palette_color": self.selected_palette_color,
             "active_tab": self.inspector_tabs.currentIndex(),
             "layers": self._history_entry_layers(),
+            "stop_table_column_widths": list(self._stop_table_column_widths),
         }
         if include_ui:
             payload.update(
@@ -411,6 +414,12 @@ class GradientWindow(QMainWindow):
         unit = state.get("unit", "%")
         self.toolbar.unit_px.setChecked(unit == "px")
         self.toolbar.unit_percent.setChecked(unit != "px")
+        column_widths = state.get("stop_table_column_widths")
+        if isinstance(column_widths, list) and len(column_widths) == 3:
+            try:
+                self._stop_table_column_widths = [max(36, int(width)) for width in column_widths]
+            except (TypeError, ValueError):
+                self._stop_table_column_widths = [52, 48, 52]
         self._apply_palette_state(state.get("palette_colors"), state.get("selected_palette_color", self.palette.palette_colors[0]))
         self._apply_layers_state(layers_state, int(state.get("active_tab", 0)))
         self._refresh_all()
@@ -478,13 +487,32 @@ class GradientWindow(QMainWindow):
                 self._on_stop_table_reorder_requested,
                 self._on_stop_table_add_requested,
                 self._on_stop_table_color_dropped,
+                self._stop_table_column_widths,
+                self._on_stop_table_column_resized,
             )
         return build_pending_inspector(str(kind))
 
     def _populate_stop_table(self, table: QTableWidget, layer: dict):
         self._table_syncing = True
         populate_linear_stop_table(table, layer, self._format_stop_value)
+        for index, width in enumerate(self._stop_table_column_widths):
+            table.setColumnWidth(index, width)
         self._table_syncing = False
+
+    def _on_stop_table_column_resized(self, source_table: QTableWidget, section: int, width: int):
+        width = max(36, int(width))
+        if not (0 <= section < len(self._stop_table_column_widths)):
+            return
+        if self._stop_table_column_widths[section] == width:
+            return
+        self._stop_table_column_widths[section] = width
+        for layer in self.layers:
+            table = layer.get("_stop_table")
+            if isinstance(table, QTableWidget) and table is not source_table and section < table.columnCount():
+                table.blockSignals(True)
+                table.setColumnWidth(section, width)
+                table.blockSignals(False)
+        self._save_state()
 
     def _linear_stops_css(self, layer: dict) -> str:
         return linear_stops_css(layer, self._format_stop_value)
@@ -783,6 +811,7 @@ class GradientWindow(QMainWindow):
         self.toolbar.grid_input.setValue(10)
         self.toolbar.grid_check.setChecked(True)
         self.toolbar.guide_check.setChecked(True)
+        self._stop_table_column_widths = [52, 48, 52]
         self.layers = []
         self.inspector_tabs.clear()
         self._add_layer("background", self._new_background_layer())

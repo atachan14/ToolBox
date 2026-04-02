@@ -44,12 +44,17 @@ class MarkdownEditor(QPlainTextEdit):
     def _reset_current_char_format(self):
         self.setCurrentCharFormat(QTextCharFormat())
 
+    def _vertical_edge_move_mode(self, event):
+        if event.modifiers() & Qt.ShiftModifier:
+            return QTextCursor.KeepAnchor
+        return QTextCursor.MoveAnchor
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Up:
             cursor = self.textCursor()
             block = cursor.block()
             if block.isValid() and not block.previous().isValid():
-                cursor.movePosition(QTextCursor.StartOfBlock)
+                cursor.movePosition(QTextCursor.StartOfBlock, self._vertical_edge_move_mode(event))
                 self.setTextCursor(cursor)
                 return
 
@@ -57,7 +62,7 @@ class MarkdownEditor(QPlainTextEdit):
             cursor = self.textCursor()
             block = cursor.block()
             if block.isValid() and not block.next().isValid():
-                cursor.movePosition(QTextCursor.EndOfBlock)
+                cursor.movePosition(QTextCursor.EndOfBlock, self._vertical_edge_move_mode(event))
                 self.setTextCursor(cursor)
                 return
 
