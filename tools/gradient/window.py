@@ -12,7 +12,7 @@ from .canvas import GradientCanvas, GradientCanvasConfig
 from .color_utils import display_color_text, parse_color_text
 from .footer import GradientFooter
 from .history_preview import GradientHistoryItemWidget, build_history_preview_lines, history_preview_height, render_history_preview_pixmap
-from .layer_panels import build_background_inspector, build_linear_inspector, build_pending_inspector, populate_linear_stop_table, style_color_value_widget
+from .layer_panels import build_background_inspector, build_linear_inspector, build_pending_inspector, build_radial_inspector, populate_linear_stop_table, style_color_value_widget
 from .linear_layer import append_stop, append_stop_after_last, delete_stop, duplicate_stop, linear_stops_css, move_stop, reorder_stop, set_stop_color, step_stop, toggle_stop_muted, update_stop_from_table
 from .palette_data_window import PaletteDataWindow
 from .palette import GradientPalette
@@ -69,6 +69,10 @@ class GradientWindow(QMainWindow):
         self._redo_stack: list[dict] = []
         self._applying_undo_redo = False
         self._undo_batch_depth = 0
+        self._state_commit_timer = QTimer(self)
+        self._state_commit_timer.setSingleShot(True)
+        self._state_commit_timer.setInterval(120)
+        self._state_commit_timer.timeout.connect(self._commit_state_snapshot)
 
         self._build_ui()
         self._connect_ui()
@@ -114,6 +118,7 @@ class GradientWindow(QMainWindow):
                 linear_stop_clicked=self._add_stop_from_canvas,
                 linear_stop_moved=self._move_stop_from_canvas,
                 linear_stop_deleted=self._delete_stop_from_canvas,
+                radial_center_moved=self._move_radial_center_from_canvas,
                 interaction_started=self._begin_undo_batch,
                 interaction_finished=self._end_undo_batch,
             )
@@ -215,6 +220,17 @@ class GradientWindow(QMainWindow):
         rad = math.radians(deg)
         return max(1e-6, abs(math.sin(rad)) * width + abs(math.cos(rad)) * height)
 
+    def _radial_span(self, layer: dict, axis: str = "radius") -> float:
+        width, height, _unit = self._get_size()
+        if axis == "x":
+            return max(1e-6, width)
+        if axis == "y":
+            return max(1e-6, height)
+        center_x = float(layer.get("center_x", 0.5)) * width
+        center_y = float(layer.get("center_y", 0.5)) * height
+        corners = ((0.0, 0.0), (width, 0.0), (0.0, height), (width, height))
+        return max(1e-6, max(math.hypot(center_x - x, center_y - y) for x, y in corners))
+
     def _layer_effective_deg(self, layer: dict) -> float:
         mode = str(layer.get("deg_mode", "input"))
         if mode != "input":
@@ -226,8 +242,17 @@ class GradientWindow(QMainWindow):
     def _format_stop_value(self, layer: dict, position: float) -> str:
         def _compact(number: float) -> str:
             return str(int(round(number))) if abs(number - round(number)) < 1e-9 else f"{number:.2f}"
+        if layer.get("kind") == "radial":
+            return self._format_radial_position_value(layer, position, axis="radius")
         if self._unit_name() == "px":
             return f"{_compact(position * self._gradient_span(self._layer_effective_deg(layer)))}px"
+        return f"{_compact(position * 100.0)}%"
+
+    def _format_radial_position_value(self, layer: dict, position: float, axis: str) -> str:
+        def _compact(number: float) -> str:
+            return str(int(round(number))) if abs(number - round(number)) < 1e-9 else f"{number:.2f}"
+        if self._unit_name() == "px":
+            return f"{_compact(position * self._radial_span(layer, axis))}px"
         return f"{_compact(position * 100.0)}%"
 
     def _parse_stop_value(self, layer: dict, text: str) -> float | None:
@@ -235,10 +260,11 @@ class GradientWindow(QMainWindow):
         if not value_text:
             return None
         unit = self._unit_name()
+        span = self._radial_span(layer, "radius") if layer.get("kind") == "radial" else self._gradient_span(self._layer_effective_deg(layer))
         try:
             if value_text.endswith("px"):
                 numeric = float(value_text[:-2].strip())
-                return numeric / self._gradient_span(self._layer_effective_deg(layer))
+                return numeric / span
             if value_text.endswith("%"):
                 numeric = float(value_text[:-1].strip())
                 return numeric / 100.0
@@ -246,7 +272,27 @@ class GradientWindow(QMainWindow):
         except ValueError:
             return None
         if unit == "px":
-            return numeric / self._gradient_span(self._layer_effective_deg(layer))
+            return numeric / span
+        return numeric / 100.0
+
+    def _parse_radial_position_value(self, layer: dict, text: str, axis: str) -> float | None:
+        value_text = text.strip().lower()
+        if not value_text:
+            return None
+        unit = self._unit_name()
+        span = self._radial_span(layer, axis)
+        try:
+            if value_text.endswith("px"):
+                numeric = float(value_text[:-2].strip())
+                return numeric / span
+            if value_text.endswith("%"):
+                numeric = float(value_text[:-1].strip())
+                return numeric / 100.0
+            numeric = float(value_text)
+        except ValueError:
+            return None
+        if unit == "px":
+            return numeric / span
         return numeric / 100.0
 
     def _set_cursor_text(self, text: str):
@@ -260,7 +306,7 @@ class GradientWindow(QMainWindow):
 
     def _refresh_cursor_text(self):
         layer = self._active_layer()
-        if self._hover_position is not None and layer and layer.get("kind") == "linear":
+        if self._hover_position is not None and layer and layer.get("kind") in ("linear", "radial"):
             self.footer.set_cursor_text(f"Cursor: stop={self._format_stop_value(layer, self._hover_position)}")
             return
         self.footer.set_cursor_text(self._default_cursor_text())
@@ -268,7 +314,7 @@ class GradientWindow(QMainWindow):
     def _set_hover_position(self, position: float | None):
         self._hover_position = position
         layer = self._active_layer()
-        if position is not None and layer and layer.get("kind") == "linear":
+        if position is not None and layer and layer.get("kind") in ("linear", "radial"):
             self.footer.set_cursor_text(f"Cursor: stop={self._format_stop_value(layer, position)}")
         elif position is None:
             self._refresh_cursor_text()
@@ -365,6 +411,13 @@ class GradientWindow(QMainWindow):
         if clear_redo:
             self._redo_stack.clear()
 
+    def _commit_state_snapshot(self):
+        self._save_state()
+        self._record_undo_snapshot()
+
+    def _schedule_state_commit(self):
+        self._state_commit_timer.start()
+
     def _apply_snapshot(self, snapshot: dict):
         self._applying_undo_redo = True
         try:
@@ -458,6 +511,8 @@ class GradientWindow(QMainWindow):
         return f"{prefix}{index}"
 
     def _new_layer(self, kind: str) -> dict:
+        if kind == "radial":
+            return {"kind": kind, "name": self._layer_default_name(kind), "center_x": 0.5, "center_y": 0.5, "repeat": False, "stops": [], "muted": False}
         return {"kind": kind, "name": self._layer_default_name(kind), "deg": 90, "deg_mode": "input", "repeat": False, "stops": [], "muted": False}
 
     def _new_background_layer(self) -> dict:
@@ -502,6 +557,23 @@ class GradientWindow(QMainWindow):
                 self._format_stop_value,
                 self._on_layer_deg_changed,
                 self._on_layer_deg_mode_changed,
+                self._on_layer_repeat_changed,
+                self._on_stop_table_cell_clicked,
+                self._on_stop_table_item_changed,
+                self._on_stop_table_context_requested,
+                self._on_stop_table_step_requested,
+                self._on_stop_table_reorder_requested,
+                self._on_stop_table_add_requested,
+                self._on_stop_table_color_dropped,
+                self._stop_table_column_widths,
+                self._on_stop_table_column_resized,
+            )
+        if kind == "radial":
+            return build_radial_inspector(
+                layer,
+                self._format_radial_position_value,
+                self._on_radial_center_changed,
+                self._on_radial_center_step_requested,
                 self._on_layer_repeat_changed,
                 self._on_stop_table_cell_clicked,
                 self._on_stop_table_item_changed,
@@ -563,6 +635,42 @@ class GradientWindow(QMainWindow):
             style_color_value_widget(color_value, color)
         self._refresh_all()
 
+    def _on_radial_center_changed(self, layer: dict, x_widget: QLineEdit, y_widget: QLineEdit):
+        parsed_x = self._parse_radial_position_value(layer, x_widget.text(), "x")
+        parsed_y = self._parse_radial_position_value(layer, y_widget.text(), "y")
+        if parsed_x is None or parsed_y is None:
+            x_widget.setText(self._format_radial_position_value(layer, float(layer.get("center_x", 0.5)), "x"))
+            y_widget.setText(self._format_radial_position_value(layer, float(layer.get("center_y", 0.5)), "y"))
+            return
+        layer["center_x"] = parsed_x
+        layer["center_y"] = parsed_y
+        x_widget.setText(self._format_radial_position_value(layer, parsed_x, "x"))
+        y_widget.setText(self._format_radial_position_value(layer, parsed_y, "y"))
+        self._refresh_all()
+
+    def _on_radial_center_step_requested(self, layer: dict, x_widget: QLineEdit, y_widget: QLineEdit, axis: str, delta: int):
+        current = float(layer.get("center_x", 0.5)) if axis == "x" else float(layer.get("center_y", 0.5))
+        if self._unit_name() == "px":
+            current += delta / self._radial_span(layer, axis)
+        else:
+            current += delta / 100.0
+        if axis == "x":
+            layer["center_x"] = current
+        else:
+            layer["center_y"] = current
+        x_widget.setText(self._format_radial_position_value(layer, float(layer.get("center_x", 0.5)), "x"))
+        y_widget.setText(self._format_radial_position_value(layer, float(layer.get("center_y", 0.5)), "y"))
+        self._refresh_lightweight(layer)
+        self._schedule_state_commit()
+
+    def _move_radial_center_from_canvas(self, center_x: float, center_y: float):
+        layer = self._active_layer()
+        if not layer or layer.get("kind") != "radial":
+            return
+        layer["center_x"] = center_x
+        layer["center_y"] = center_y
+        self._refresh_all()
+
     def _on_background_value_edited(self, layer: dict, widget: QLineEdit):
         parsed = parse_color_text(widget.text())
         if parsed is None:
@@ -615,16 +723,16 @@ class GradientWindow(QMainWindow):
             return
         self._refresh_all()
 
-    def _on_stop_table_cell_clicked(self, layer: dict, table: QTableWidget, row: int, _column: int):
+    def _on_stop_table_cell_clicked(self, layer: dict, table: QTableWidget, row: int, column: int):
         stops = list(layer.get("stops") or [])
         if not (0 <= row < len(stops)):
             return
         self._selected_stop_index = row
-        current_item = table.item(row, 0)
+        current_item = table.item(row, column)
         if current_item is not None:
             table.setCurrentItem(current_item)
-        self.canvas.ensure_stop_visible(layer, row)
         self.canvas.focus_stop(layer, row)
+        self.canvas.ensure_stop_visible(layer, row)
 
     def _on_stop_table_context_requested(self, layer: dict, table: QTableWidget, pos: QPoint):
         item = table.itemAt(pos)
@@ -659,10 +767,12 @@ class GradientWindow(QMainWindow):
             self._refresh_all()
 
     def _on_stop_table_step_requested(self, layer: dict, table: QTableWidget, row: int, column: int, delta: int):
-        if not step_stop(layer, row, column, delta, self._unit_name(), self._gradient_span(self._layer_effective_deg(layer))):
+        span = self._radial_span(layer, "radius") if layer.get("kind") == "radial" else self._gradient_span(self._layer_effective_deg(layer))
+        if not step_stop(layer, row, column, delta, self._unit_name(), span):
             return
         self._selected_stop_index = row
-        self._refresh_all()
+        self._refresh_lightweight(layer)
+        self._schedule_state_commit()
         current_item = table.item(row, column)
         if current_item is not None:
             table.setCurrentItem(current_item)
@@ -685,7 +795,8 @@ class GradientWindow(QMainWindow):
                 table.setCurrentItem(target_item)
 
     def _on_stop_table_add_requested(self, layer: dict):
-        append_stop_after_last(layer, self.selected_palette_color, self._unit_name(), self._gradient_span(self._layer_effective_deg(layer)))
+        span = self._radial_span(layer, "radius") if layer.get("kind") == "radial" else self._gradient_span(self._layer_effective_deg(layer))
+        append_stop_after_last(layer, self.selected_palette_color, self._unit_name(), span)
         self._selected_stop_index = len(layer.get("stops", [])) - 1
         self._refresh_all()
 
@@ -697,10 +808,27 @@ class GradientWindow(QMainWindow):
 
     def _refresh_active_table(self):
         layer = self._active_layer()
-        if layer and layer.get("kind") == "linear":
+        if layer and layer.get("kind") in ("linear", "radial"):
             table = layer.get("_stop_table")
             if isinstance(table, QTableWidget):
                 self._populate_stop_table(table, layer)
+
+    def _refresh_lightweight(self, target_layer: dict | None = None):
+        self.palette.select_color(self.selected_palette_color)
+        self._update_tab_visuals()
+        if target_layer is not None:
+            table = target_layer.get("_stop_table")
+            if isinstance(table, QTableWidget):
+                self._populate_stop_table(table, target_layer)
+            if target_layer.get("kind") == "radial":
+                x_widget = target_layer.get("_radial_cx_input")
+                y_widget = target_layer.get("_radial_cy_input")
+                if isinstance(x_widget, QLineEdit):
+                    x_widget.setText(self._format_radial_position_value(target_layer, float(target_layer.get("center_x", 0.5)), "x"))
+                if isinstance(y_widget, QLineEdit):
+                    y_widget.setText(self._format_radial_position_value(target_layer, float(target_layer.get("center_y", 0.5)), "y"))
+        self._refresh_code()
+        self.canvas.update()
 
     def _on_layer_deg_changed(self, layer: dict, value: int):
         layer["deg"] = value
@@ -716,7 +844,7 @@ class GradientWindow(QMainWindow):
 
     def _add_stop_from_canvas(self, position: float):
         layer = self._active_layer()
-        if not layer or layer.get("kind") != "linear":
+        if not layer or layer.get("kind") not in ("linear", "radial"):
             return
         append_stop(layer, self.selected_palette_color, position)
         self._selected_stop_index = len(layer.get("stops", [])) - 1
@@ -724,7 +852,7 @@ class GradientWindow(QMainWindow):
 
     def _move_stop_from_canvas(self, index: int, position: float):
         layer = self._active_layer()
-        if not layer or layer.get("kind") != "linear":
+        if not layer or layer.get("kind") not in ("linear", "radial"):
             return
         if not move_stop(layer, index, position):
             return
@@ -733,7 +861,7 @@ class GradientWindow(QMainWindow):
 
     def _delete_stop_from_canvas(self, index: int):
         layer = self._active_layer()
-        if not layer or layer.get("kind") != "linear":
+        if not layer or layer.get("kind") not in ("linear", "radial"):
             return
         if not delete_stop(layer, index):
             return
@@ -753,7 +881,11 @@ class GradientWindow(QMainWindow):
             deg_text = deg_mode if deg_mode != "input" else f"{int(layer.get('deg', 90))}deg"
             return f"{repeat_prefix}linear-gradient({deg_text}, {stops_text})"
         if kind == "radial":
-            return "radial-gradient(/* pending */)"
+            repeat_prefix = "repeating-" if layer.get("repeat") else ""
+            cx = self._format_radial_position_value(layer, float(layer.get("center_x", 0.5)), "x")
+            cy = self._format_radial_position_value(layer, float(layer.get("center_y", 0.5)), "y")
+            stops_text = self._linear_stops_css(layer)
+            return f"{repeat_prefix}radial-gradient(circle at {cx} {cy}, {stops_text})"
         return "conic-gradient(/* pending */)"
 
     def _refresh_code(self):
@@ -771,6 +903,13 @@ class GradientWindow(QMainWindow):
         self.palette.select_color(self.selected_palette_color)
         self._update_tab_visuals()
         for layer in self.layers:
+            if layer.get("kind") == "radial":
+                x_widget = layer.get("_radial_cx_input")
+                y_widget = layer.get("_radial_cy_input")
+                if isinstance(x_widget, QLineEdit):
+                    x_widget.setText(self._format_radial_position_value(layer, float(layer.get("center_x", 0.5)), "x"))
+                if isinstance(y_widget, QLineEdit):
+                    y_widget.setText(self._format_radial_position_value(layer, float(layer.get("center_y", 0.5)), "y"))
             table = layer.get("_stop_table")
             if isinstance(table, QTableWidget):
                 self._populate_stop_table(table, layer)
@@ -785,7 +924,7 @@ class GradientWindow(QMainWindow):
 
     def _on_tab_changed(self, *_):
         layer = self._active_layer()
-        if not layer or layer.get("kind") != "linear":
+        if not layer or layer.get("kind") not in ("linear", "radial"):
             self._selected_stop_index = None
         else:
             stops = list(layer.get("stops") or [])

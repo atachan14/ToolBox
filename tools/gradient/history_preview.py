@@ -125,43 +125,53 @@ def render_history_preview_pixmap(entry: dict, size: QSize, canvas) -> QPixmap:
         return min(positions), max(positions)
 
     for layer in layers:
-        if not isinstance(layer, dict) or layer.get("muted", False) or layer.get("kind") != "linear":
+        if not isinstance(layer, dict) or layer.get("muted", False):
             continue
-        deg = canvas._layer_deg(layer)
-        guide_rect_f = QRectF(guide_rect)
-        min_position, max_position = position_range_for_rect(guide_rect_f, deg)
-        start_point = position_to_point(guide_rect_f, min_position, deg)
-        end_point = position_to_point(guide_rect_f, max_position, deg)
-        center = QPointF((start_point.x() + end_point.x()) / 2.0, (start_point.y() + end_point.y()) / 2.0)
-        half_span = math.hypot(end_point.x() - start_point.x(), end_point.y() - start_point.y()) / 2.0
-        thickness = max(1.0, math.hypot(guide_rect.width(), guide_rect.height()) * 2.0)
-        sample_count = max(256, int(math.ceil(half_span * 2.0)))
-        axis_aligned = canvas._axis_aligned_deg(deg)
-        if axis_aligned in (90.0, 270.0):
-            strip = canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=False)
+        kind = layer.get("kind")
+        if kind == "linear":
+            deg = canvas._layer_deg(layer)
+            guide_rect_f = QRectF(guide_rect)
+            min_position, max_position = position_range_for_rect(guide_rect_f, deg)
+            start_point = position_to_point(guide_rect_f, min_position, deg)
+            end_point = position_to_point(guide_rect_f, max_position, deg)
+            center = QPointF((start_point.x() + end_point.x()) / 2.0, (start_point.y() + end_point.y()) / 2.0)
+            half_span = math.hypot(end_point.x() - start_point.x(), end_point.y() - start_point.y()) / 2.0
+            thickness = max(1.0, math.hypot(guide_rect.width(), guide_rect.height()) * 2.0)
+            sample_count = max(256, int(math.ceil(half_span * 2.0)))
+            axis_aligned = canvas._axis_aligned_deg(deg)
+            if axis_aligned in (90.0, 270.0):
+                strip = canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=False)
+                painter.drawImage(
+                    QRectF(center.x() - half_span, center.y() - thickness / 2.0, half_span * 2.0, thickness),
+                    strip,
+                    QRectF(0.0, 0.0, float(strip.width()), 1.0),
+                )
+            elif axis_aligned in (0.0, 180.0):
+                strip = canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=True)
+                painter.drawImage(
+                    QRectF(center.x() - thickness / 2.0, center.y() - half_span, thickness, half_span * 2.0),
+                    strip,
+                    QRectF(0.0, 0.0, 1.0, float(strip.height())),
+                )
+            else:
+                strip = canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=False)
+                painter.save()
+                painter.translate(center)
+                painter.rotate(deg - 90.0)
+                painter.drawImage(
+                    QRectF(-half_span, -thickness / 2.0, half_span * 2.0, thickness),
+                    strip,
+                    QRectF(0.0, 0.0, float(strip.width()), 1.0),
+                )
+                painter.restore()
+        elif kind == "radial":
+            guide_rect_f = QRectF(guide_rect)
+            radial_image = canvas._build_radial_image(layer, guide_rect_f)
             painter.drawImage(
-                QRectF(center.x() - half_span, center.y() - thickness / 2.0, half_span * 2.0, thickness),
-                strip,
-                QRectF(0.0, 0.0, float(strip.width()), 1.0),
+                guide_rect_f,
+                radial_image,
+                QRectF(0.0, 0.0, float(radial_image.width()), float(radial_image.height())),
             )
-        elif axis_aligned in (0.0, 180.0):
-            strip = canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=True)
-            painter.drawImage(
-                QRectF(center.x() - thickness / 2.0, center.y() - half_span, thickness, half_span * 2.0),
-                strip,
-                QRectF(0.0, 0.0, 1.0, float(strip.height())),
-            )
-        else:
-            strip = canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=False)
-            painter.save()
-            painter.translate(center)
-            painter.rotate(deg - 90.0)
-            painter.drawImage(
-                QRectF(-half_span, -thickness / 2.0, half_span * 2.0, thickness),
-                strip,
-                QRectF(0.0, 0.0, float(strip.width()), 1.0),
-            )
-            painter.restore()
     painter.restore()
     painter.setPen(QColor("#69738a"))
     painter.drawRect(guide_rect)

@@ -25,6 +25,7 @@ class GradientCanvasConfig:
     linear_stop_clicked: Callable[[float], None]
     linear_stop_moved: Callable[[int, float], None]
     linear_stop_deleted: Callable[[int], None]
+    radial_center_moved: Callable[[float, float], None]
     interaction_started: Callable[[], None]
     interaction_finished: Callable[[], None]
 
@@ -52,12 +53,18 @@ class GradientCanvas(QWidget):
         self.last_mouse_screen = QPointF(0, 0)
         self._hover_position: float | None = None
         self._dragging_stop_index: int | None = None
+        self._dragging_radial_center = False
         self._pending_add_position: float | None = None
         self._pending_background_click = False
         self._stop_hit_radius = 8.0
+        self._interactive_render = False
         self._animation_timer = QTimer(self)
         self._animation_timer.setInterval(16)
         self._animation_timer.timeout.connect(self._tick_view_animation)
+        self._render_settle_timer = QTimer(self)
+        self._render_settle_timer.setSingleShot(True)
+        self._render_settle_timer.setInterval(120)
+        self._render_settle_timer.timeout.connect(self._end_interactive_render)
         self._animation_progress = 0
         self._animation_steps = 12
         self._animation_start_zoom = 1.0
@@ -68,8 +75,15 @@ class GradientCanvas(QWidget):
         self._focus_stop_index: int | None = None
         self._focus_progress = 0
         self._focus_steps = 30
+        self._radial_cache: dict[tuple, QImage] = {}
         self.setMouseTracking(True)
         self.setMinimumHeight(10)
+
+    def _end_interactive_render(self):
+        if self.panning or self.middle_panning or self._dragging_stop_index is not None or self._dragging_radial_center:
+            return
+        self._interactive_render = False
+        self.update()
 
     def _layer_deg(self, layer: dict) -> float:
         mode = str(layer.get("deg_mode", "input"))
@@ -158,6 +172,30 @@ class GradientCanvas(QWidget):
         step = max(step, 1e-6)
         return round(position / step) * step
 
+    def _snap_scene_point_to_grid(self, point: QPointF) -> QPointF:
+        active, grid_value = self.config.grid_getter()
+        if not active:
+            return point
+        rect = self._guide_rect_scene()
+        step_x, step_y = self._grid_steps_normalized(max(1, grid_value))
+        norm_x = (point.x() - rect.x()) / max(1e-6, rect.width())
+        norm_y = (point.y() - rect.y()) / max(1e-6, rect.height())
+        snapped_x = round(norm_x / step_x) * step_x
+        snapped_y = round(norm_y / step_y) * step_y
+        return QPointF(rect.x() + rect.width() * snapped_x, rect.y() + rect.height() * snapped_y)
+
+    def _snap_radial_position(self, layer: dict, position: float) -> float:
+        active, grid_value = self.config.grid_getter()
+        if not active:
+            return position
+        size_w, size_h, unit = self.config.size_getter()
+        if unit == "px":
+            step = grid_value / max(self._radial_span(layer), 1e-6)
+        else:
+            step = grid_value / 100.0
+        step = max(step, 1e-6)
+        return round(position / step) * step
+
     def _position_to_scene(self, position: float, deg: float) -> QPointF:
         rect = self._guide_rect_scene()
         direction = self._gradient_direction(deg)
@@ -175,6 +213,36 @@ class GradientCanvas(QWidget):
         )
         positions = [self._project_point_to_position(corner, deg) for corner in corners]
         return min(positions), max(positions)
+
+    def _radial_center_scene(self, layer: dict, target_rect: QRectF | None = None) -> QPointF:
+        rect = target_rect if target_rect is not None else self._guide_rect_scene()
+        return QPointF(
+            rect.x() + rect.width() * float(layer.get("center_x", 0.5)),
+            rect.y() + rect.height() * float(layer.get("center_y", 0.5)),
+        )
+
+    def _radial_center_normalized(self, scene_point: QPointF, target_rect: QRectF | None = None) -> tuple[float, float]:
+        rect = target_rect if target_rect is not None else self._guide_rect_scene()
+        return (
+            (scene_point.x() - rect.x()) / max(1e-6, rect.width()),
+            (scene_point.y() - rect.y()) / max(1e-6, rect.height()),
+        )
+
+    def _radial_span(self, layer: dict, target_rect: QRectF | None = None) -> float:
+        rect = target_rect if target_rect is not None else self._guide_rect_scene()
+        center = self._radial_center_scene(layer, rect)
+        corners = (rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight())
+        return max(1e-6, max(math.hypot(corner.x() - center.x(), corner.y() - center.y()) for corner in corners))
+
+    def _project_radial_point_to_position(self, point: QPointF, layer: dict, target_rect: QRectF | None = None) -> float:
+        rect = target_rect if target_rect is not None else self._guide_rect_scene()
+        center = self._radial_center_scene(layer, rect)
+        return math.hypot(point.x() - center.x(), point.y() - center.y()) / self._radial_span(layer, rect)
+
+    def _radial_position_to_scene(self, position: float, layer: dict, target_rect: QRectF | None = None) -> QPointF:
+        rect = target_rect if target_rect is not None else self._guide_rect_scene()
+        center = self._radial_center_scene(layer, rect)
+        return QPointF(center.x() + self._radial_span(layer, rect) * position, center.y())
 
     def _prepared_linear_stops(self, layer: dict) -> list[tuple[float, QColor]]:
         prepared: list[tuple[float, QColor]] = []
@@ -252,14 +320,54 @@ class GradientCanvas(QWidget):
                 image.setPixelColor(index, 0, self._sample_linear_color(stops, position, repeat))
         return image
 
+    def _build_radial_image(self, layer: dict, target_rect: QRectF) -> QImage:
+        downsample = 2 if self._interactive_render else 1
+        width = max(1, int(math.ceil(target_rect.width() / downsample)))
+        height = max(1, int(math.ceil(target_rect.height() / downsample)))
+        cache_key = (
+            id(layer),
+            round(float(layer.get("center_x", 0.5)), 6),
+            round(float(layer.get("center_y", 0.5)), 6),
+            bool(layer.get("repeat", False)),
+            width,
+            height,
+            tuple(
+                (
+                    str(stop.get("color", "#ffffff")),
+                    round(float(stop.get("position", 0.0)), 6),
+                    bool(stop.get("muted", False)),
+                )
+                for stop in (layer.get("stops") or [])
+            ),
+        )
+        cached = self._radial_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
+        stops = self._prepared_linear_stops(layer)
+        repeat = bool(layer.get("repeat", False))
+        center = self._radial_center_scene(layer, target_rect)
+        span = self._radial_span(layer, target_rect)
+        for y in range(height):
+            sy = target_rect.y() + ((y + 0.5) * downsample)
+            for x in range(width):
+                sx = target_rect.x() + ((x + 0.5) * downsample)
+                position = math.hypot(sx - center.x(), sy - center.y()) / span
+                image.setPixelColor(x, y, self._sample_linear_color(stops, position, repeat))
+        self._radial_cache = {cache_key: image}
+        return image
+
     def _find_hit_stop_index(self, layer: dict, scene_point: QPointF) -> int | None:
-        deg = self._layer_deg(layer)
+        kind = layer.get("kind")
         nearest_idx = None
         nearest_dist = float("inf")
         for idx, stop in enumerate(layer.get("stops") or []):
             if stop.get("muted", False):
                 continue
-            stop_scene = self._position_to_scene(float(stop.get("position", 0.0)), deg)
+            if kind == "radial":
+                stop_scene = self._radial_position_to_scene(float(stop.get("position", 0.0)), layer)
+            else:
+                stop_scene = self._position_to_scene(float(stop.get("position", 0.0)), self._layer_deg(layer))
             dx = stop_scene.x() - scene_point.x()
             dy = stop_scene.y() - scene_point.y()
             dist = (dx * dx + dy * dy) ** 0.5
@@ -278,6 +386,8 @@ class GradientCanvas(QWidget):
         stops = list(layer.get("stops") or [])
         if not (0 <= index < len(stops)):
             return None
+        if layer.get("kind") == "radial":
+            return self._radial_position_to_scene(float(stops[index].get("position", 0.0)), layer)
         return self._position_to_scene(float(stops[index].get("position", 0.0)), self._layer_deg(layer))
 
     def ensure_stop_visible(self, layer: dict, index: int):
@@ -306,7 +416,14 @@ class GradientCanvas(QWidget):
         self._focus_stop_layer_id = id(layer)
         self._focus_stop_index = index
         self._focus_progress = 0
-        self._start_view_animation(self.zoom, self.pan)
+        if not self._animation_timer.isActive():
+            self._animation_start_zoom = self.zoom
+            self._animation_target_zoom = self.zoom
+            self._animation_start_pan = QPointF(self.pan)
+            self._animation_target_pan = QPointF(self.pan)
+            self._animation_progress = 0
+            self._animation_timer.start()
+        self.update()
 
     def _start_view_animation(self, target_zoom: float, target_pan: QPointF):
         self._animation_start_zoom = self.zoom
@@ -351,10 +468,12 @@ class GradientCanvas(QWidget):
         active_layer = self.config.active_layer_getter()
         if (event.modifiers() & Qt.ControlModifier) and event.button() == Qt.LeftButton:
             self.panning = True
+            self._interactive_render = True
             return
         if event.button() == Qt.MiddleButton:
             self.middle_panning = True
             self.panning = True
+            self._interactive_render = True
             return
         if not active_layer:
             return
@@ -364,16 +483,27 @@ class GradientCanvas(QWidget):
             if event.button() == Qt.LeftButton:
                 self._pending_background_click = True
             return
-        if active_layer.get("kind") != "linear":
+        if active_layer.get("kind") not in ("linear", "radial"):
             return
         if event.button() == Qt.LeftButton:
+            if active_layer.get("kind") == "radial":
+                center_scene = self._radial_center_scene(active_layer)
+                if math.hypot(center_scene.x() - scene_pos.x(), center_scene.y() - scene_pos.y()) <= (self._stop_hit_radius / self.zoom):
+                    self._dragging_radial_center = True
+                    self._interactive_render = True
+                    self.config.interaction_started()
+                    return
             hit_index = self._find_hit_stop_index(active_layer, scene_pos)
             if hit_index is not None:
                 self._dragging_stop_index = hit_index
+                self._interactive_render = True
                 self.config.interaction_started()
                 return
-            deg = self._layer_deg(active_layer)
-            self._pending_add_position = self._snap_position(self._project_point_to_position(scene_pos, deg), deg)
+            if active_layer.get("kind") == "radial":
+                self._pending_add_position = self._snap_radial_position(active_layer, self._project_radial_point_to_position(scene_pos, active_layer))
+            else:
+                deg = self._layer_deg(active_layer)
+                self._pending_add_position = self._snap_position(self._project_point_to_position(scene_pos, deg), deg)
             self._hover_position = self._pending_add_position
             self.config.linear_stop_hovered(self._hover_position)
             self.update()
@@ -401,12 +531,23 @@ class GradientCanvas(QWidget):
         else:
             self.config.cursor_changed(f"Cursor: x={x_n * 100:.2f}%, y={y_n * 100:.2f}%")
         active_layer = self.config.active_layer_getter()
-        if active_layer and not active_layer.get("muted", False) and active_layer.get("kind") == "linear":
-            deg = self._layer_deg(active_layer)
-            if self._dragging_stop_index is not None or self._pending_add_position is not None:
-                self._hover_position = self._snap_position(self._project_point_to_position(scene_pos, deg), deg)
+        if active_layer and not active_layer.get("muted", False) and active_layer.get("kind") in ("linear", "radial"):
+            if active_layer.get("kind") == "radial":
+                if self._dragging_radial_center:
+                    snapped_scene = self._snap_scene_point_to_grid(scene_pos)
+                    center_x, center_y = self._radial_center_normalized(snapped_scene)
+                    self.config.radial_center_moved(center_x, center_y)
+                    self._hover_position = None
+                elif self._dragging_stop_index is not None or self._pending_add_position is not None:
+                    self._hover_position = self._snap_radial_position(active_layer, self._project_radial_point_to_position(scene_pos, active_layer))
+                else:
+                    self._hover_position = None
             else:
-                self._hover_position = None
+                deg = self._layer_deg(active_layer)
+                if self._dragging_stop_index is not None or self._pending_add_position is not None:
+                    self._hover_position = self._snap_position(self._project_point_to_position(scene_pos, deg), deg)
+                else:
+                    self._hover_position = None
             if self._dragging_stop_index is not None and self._hover_position is not None:
                 self.config.linear_stop_moved(self._dragging_stop_index, self._hover_position)
             self.config.linear_stop_hovered(self._hover_position)
@@ -421,50 +562,72 @@ class GradientCanvas(QWidget):
         if event.button() == Qt.MiddleButton:
             self.middle_panning = False
             self.panning = False
+            self._interactive_render = False
             return
         if event.button() != Qt.LeftButton:
             return
         if self.panning:
             self.panning = False
             self.middle_panning = False
+            self._interactive_render = False
             return
         if not active_layer:
             self._dragging_stop_index = None
+            self._dragging_radial_center = False
             self._pending_add_position = None
             self._pending_background_click = False
+            self._interactive_render = False
             return
         if active_layer.get("muted", False):
             self._dragging_stop_index = None
+            self._dragging_radial_center = False
             self._pending_add_position = None
             self._pending_background_click = False
             self._hover_position = None
             self.config.linear_stop_hovered(None)
+            self._interactive_render = False
             self.update()
             return
         if active_layer.get("kind") == "background":
             if self._pending_background_click:
                 self.config.background_clicked()
             self._pending_background_click = False
+            self._interactive_render = False
             self.update()
             return
-        if active_layer.get("kind") != "linear":
+        if active_layer.get("kind") not in ("linear", "radial"):
             self._dragging_stop_index = None
+            self._dragging_radial_center = False
             self._pending_add_position = None
+            self._interactive_render = False
+            return
+        if self._dragging_radial_center:
+            self._dragging_radial_center = False
+            self._hover_position = None
+            self.config.linear_stop_hovered(None)
+            self.config.interaction_finished()
+            self._interactive_render = False
+            self.update()
             return
         if self._dragging_stop_index is not None:
             self._dragging_stop_index = None
             self._hover_position = None
             self.config.linear_stop_hovered(None)
             self.config.interaction_finished()
+            self._interactive_render = False
             self.update()
             return
         if self._pending_add_position is not None:
-            deg = self._layer_deg(active_layer)
-            final_position = self._snap_position(self._project_point_to_position(scene_pos, deg), deg)
+            if active_layer.get("kind") == "radial":
+                final_position = self._snap_radial_position(active_layer, self._project_radial_point_to_position(scene_pos, active_layer))
+            else:
+                deg = self._layer_deg(active_layer)
+                final_position = self._snap_position(self._project_point_to_position(scene_pos, deg), deg)
             self.config.linear_stop_clicked(final_position)
         self._pending_add_position = None
         self._hover_position = None
         self.config.linear_stop_hovered(None)
+        self._interactive_render = False
         self.update()
 
     def wheelEvent(self, event: QWheelEvent):
@@ -482,6 +645,8 @@ class GradientCanvas(QWidget):
         self.zoom = new_zoom
         after = self._scene_to_screen(before)
         self.pan += mouse - after
+        self._interactive_render = True
+        self._render_settle_timer.start()
         self.update()
         event.accept()
 
@@ -538,7 +703,12 @@ class GradientCanvas(QWidget):
                     )
                     painter.restore()
             elif kind == "radial":
-                painter.fillRect(guide_scene, QColor(255, 255, 255, 18))
+                radial_image = self._build_radial_image(layer, guide_scene)
+                painter.drawImage(
+                    guide_scene,
+                    radial_image,
+                    QRectF(0.0, 0.0, float(radial_image.width()), float(radial_image.height())),
+                )
             elif kind == "conic":
                 painter.fillRect(guide_scene, QColor(255, 255, 255, 10))
         painter.restore()
@@ -610,6 +780,52 @@ class GradientCanvas(QWidget):
                     painter.drawEllipse(focused_point, inner_radius, inner_radius)
             if self._hover_position is not None and self._pending_add_position is not None:
                 hover_point = self._scene_to_screen(self._position_to_scene(self._hover_position, deg))
+                painter.setPen(QPen(QColor("#4ecdc4"), 1))
+                painter.setBrush(QColor(self.config.active_palette_color_getter()))
+                painter.drawEllipse(hover_point, 6, 6)
+        elif guide_enabled and active_layer and active_layer.get("kind") == "radial":
+            center_scene = self._radial_center_scene(active_layer)
+            center_screen = self._scene_to_screen(center_scene)
+            radius = self._radial_span(active_layer)
+            radius_screen = radius * self.zoom
+            painter.setPen(QPen(QColor("#9aa5ce"), 1, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(center_screen, radius_screen, radius_screen)
+            painter.setPen(QPen(QColor("#f8fafc"), 2))
+            painter.setBrush(QColor("#111827"))
+            painter.drawEllipse(center_screen, 5, 5)
+            painter.setPen(QPen(QColor("#111827"), 1))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(center_screen, 7, 7)
+            for stop in active_layer.get("stops") or []:
+                if stop.get("muted", False):
+                    continue
+                point = self._scene_to_screen(self._radial_position_to_scene(float(stop.get("position", 0.0)), active_layer))
+                painter.setPen(QPen(QColor("#f8fafc"), 2))
+                painter.setBrush(QColor(str(stop.get("color", "#ffffff"))))
+                painter.drawEllipse(point, 5, 5)
+                painter.setPen(QPen(QColor("#111827"), 1))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(point, 7, 7)
+            if self._focus_stop_index is not None and self._focus_stop_layer_id == id(active_layer):
+                focused_stop = self._stop_scene_point(active_layer, self._focus_stop_index)
+                if focused_stop is not None:
+                    focused_point = self._scene_to_screen(focused_stop)
+                    progress = min(1.0, self._focus_progress / max(1, self._focus_steps))
+                    eased = 1.0 - ((1.0 - progress) ** 3)
+                    outer_radius = 18.0 - (10.0 * eased)
+                    inner_radius = max(7.0, outer_radius - 3.0)
+                    outer_color = QColor("#4ecdc4")
+                    outer_color.setAlphaF(max(0.0, 1.0 - eased))
+                    inner_color = QColor("#f8fafc")
+                    inner_color.setAlphaF(max(0.0, 0.9 - eased))
+                    painter.setPen(QPen(outer_color, 3))
+                    painter.setBrush(Qt.NoBrush)
+                    painter.drawEllipse(focused_point, outer_radius, outer_radius)
+                    painter.setPen(QPen(inner_color, 2))
+                    painter.drawEllipse(focused_point, inner_radius, inner_radius)
+            if self._hover_position is not None and self._pending_add_position is not None:
+                hover_point = self._scene_to_screen(self._radial_position_to_scene(self._hover_position, active_layer))
                 painter.setPen(QPen(QColor("#4ecdc4"), 1))
                 painter.setBrush(QColor(self.config.active_palette_color_getter()))
                 painter.drawEllipse(hover_point, 6, 6)

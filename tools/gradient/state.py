@@ -16,6 +16,8 @@ class LayerState(TypedDict):
     name: str
     deg: int
     deg_mode: str
+    center_x: float
+    center_y: float
     repeat: bool
     muted: bool
     color: str
@@ -36,6 +38,8 @@ def serialize_layer(layer: dict) -> LayerState:
         "name": str(layer.get("name", default_name)),
         "deg": int(layer.get("deg", 90)),
         "deg_mode": str(layer.get("deg_mode", "input")),
+        "center_x": float(layer.get("center_x", 0.5)),
+        "center_y": float(layer.get("center_y", 0.5)),
         "repeat": bool(layer.get("repeat", False)),
         "muted": bool(layer.get("muted", False)),
         "color": str(layer.get("color", "#00000000")),
@@ -64,6 +68,8 @@ def normalize_layer_payload(item: dict, default_name_factory: Callable[[str], st
         "name": str(item.get("name", default_name)),
         "deg": int(item.get("deg", 90)),
         "deg_mode": str(item.get("deg_mode", "input")),
+        "center_x": float(item.get("center_x", 0.5)),
+        "center_y": float(item.get("center_y", 0.5)),
         "repeat": bool(item.get("repeat", False)),
         "muted": bool(item.get("muted", False)),
         "color": parse_color_text(str(item.get("color", "#00000000"))) or "#00000000",

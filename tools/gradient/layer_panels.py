@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QBrush
-from PySide6.QtWidgets import QAbstractItemView, QCheckBox, QComboBox, QFrame, QHeaderView, QHBoxLayout, QLabel, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractItemView, QCheckBox, QComboBox, QFrame, QHeaderView, QHBoxLayout, QLabel, QLineEdit, QSpinBox, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from .color_utils import display_color_text, split_color_and_alpha
 from .widgets import AlphaPatternLineEdit, alpha_pattern_text_color
@@ -36,6 +36,8 @@ class StopTableWidget(QTableWidget):
     def mousePressEvent(self, event):
         item = self.itemAt(event.position().toPoint())
         if item and event.button() == Qt.LeftButton and item.row() < self.rowCount() - 1:
+            self.setCurrentItem(item)
+            self.setFocus()
             self._drag_row = item.row()
             self._press_pos = event.position().toPoint()
             self._drag_active = True
@@ -126,6 +128,35 @@ class BackgroundColorLineEdit(AlphaPatternLineEdit):
                 event.acceptProposedAction()
                 return
         super().dropEvent(event)
+
+
+class StepLineEdit(QLineEdit):
+    stepRequested = Signal(int)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Up:
+            self.stepRequested.emit(1)
+            event.accept()
+            return
+        if event.key() == Qt.Key_Down:
+            self.stepRequested.emit(-1)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
+class StopTableItemDelegate(QStyledItemDelegate):
+    def createEditor(self, parent, option, index):
+        editor = super().createEditor(parent, option, index)
+        if isinstance(editor, QLineEdit) and index.column() in (1, 2):
+            table = self.parent()
+            if isinstance(table, StopTableWidget):
+                step_editor = StepLineEdit(parent)
+                step_editor.setFrame(editor.hasFrame())
+                step_editor.setAlignment(editor.alignment())
+                step_editor.stepRequested.connect(lambda delta, row=index.row(), column=index.column(), widget=table: widget.stepRequested.emit(row, column, delta))
+                return step_editor
+        return editor
 
 
 def build_pending_inspector(kind: str) -> QWidget:
@@ -246,7 +277,64 @@ def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_de
     deg_select.currentIndexChanged.connect(_on_deg_select_changed)
     layout.addWidget(controls)
 
+    table = _build_stop_table(layer, format_stop_value, on_cell_clicked, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped, column_widths, on_column_resized)
+    populate_linear_stop_table(table, layer, format_stop_value)
+    layout.addWidget(table, 1)
+    layer["_stop_table"] = table
+    return panel
+
+
+def build_radial_inspector(layer: dict, format_position_value, on_center_changed, on_center_step_requested, on_repeat_changed, on_cell_clicked, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped, column_widths, on_column_resized) -> QWidget:
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    layout.setContentsMargins(8, 8, 8, 8)
+    layout.setSpacing(8)
+
+    controls = QFrame()
+    controls.setFrameShape(QFrame.StyledPanel)
+    controls_layout = QVBoxLayout(controls)
+    controls_layout.setContentsMargins(6, 6, 6, 6)
+    controls_layout.setSpacing(4)
+
+    repeat_row = QHBoxLayout()
+    repeat_row.setContentsMargins(0, 0, 0, 0)
+    repeat_row.setSpacing(4)
+    repeat_check = QCheckBox("repeat")
+    repeat_check.setChecked(bool(layer.get("repeat", False)))
+    repeat_check.toggled.connect(lambda checked, item=layer: on_repeat_changed(item, checked))
+    repeat_row.addWidget(repeat_check)
+    repeat_row.addStretch(1)
+    controls_layout.addLayout(repeat_row)
+
+    center_row = QHBoxLayout()
+    center_row.setContentsMargins(0, 0, 0, 0)
+    center_row.setSpacing(4)
+    center_row.addWidget(QLabel("cx"))
+    cx_input = StepLineEdit(format_position_value(layer, float(layer.get("center_x", 0.5)), axis="x"))
+    center_row.addWidget(cx_input, 1)
+    center_row.addWidget(QLabel("cy"))
+    cy_input = StepLineEdit(format_position_value(layer, float(layer.get("center_y", 0.5)), axis="y"))
+    center_row.addWidget(cy_input, 1)
+    cx_input.editingFinished.connect(lambda item=layer, x_widget=cx_input, y_widget=cy_input: on_center_changed(item, x_widget, y_widget))
+    cy_input.editingFinished.connect(lambda item=layer, x_widget=cx_input, y_widget=cy_input: on_center_changed(item, x_widget, y_widget))
+    cx_input.stepRequested.connect(lambda delta, item=layer, x_widget=cx_input, y_widget=cy_input: on_center_step_requested(item, x_widget, y_widget, "x", delta))
+    cy_input.stepRequested.connect(lambda delta, item=layer, x_widget=cx_input, y_widget=cy_input: on_center_step_requested(item, x_widget, y_widget, "y", delta))
+    controls_layout.addLayout(center_row)
+
+    layout.addWidget(controls)
+
+    table = _build_stop_table(layer, lambda owner, position: format_position_value(owner, position, axis="radius"), on_cell_clicked, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped, column_widths, on_column_resized)
+    populate_linear_stop_table(table, layer, lambda owner, position: format_position_value(owner, position, axis="radius"))
+    layout.addWidget(table, 1)
+    layer["_stop_table"] = table
+    layer["_radial_cx_input"] = cx_input
+    layer["_radial_cy_input"] = cy_input
+    return panel
+
+
+def _build_stop_table(layer: dict, format_stop_value, on_cell_clicked, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped, column_widths, on_column_resized) -> StopTableWidget:
     table = StopTableWidget(0, 3)
+    table.setItemDelegate(StopTableItemDelegate(table))
     table.setHorizontalHeaderLabels(["color", "alpha", "stop"])
     table.verticalHeader().setVisible(False)
     table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
@@ -266,17 +354,19 @@ def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_de
     table.rowReordered.connect(lambda source, target, owner=layer: on_reorder_requested(owner, source, target))
     table.colorDropped.connect(lambda row, color, owner=layer: on_color_dropped(owner, row, color))
     table.horizontalHeader().sectionResized.connect(lambda section, _old, new, widget=table: on_column_resized(widget, section, new))
-    populate_linear_stop_table(table, layer, format_stop_value)
+
     def _on_cell_clicked(row: int, column: int, owner=layer, widget=table):
         if row == widget.rowCount() - 1:
             on_add_requested(owner)
             return
+        item = widget.item(row, column)
+        if item is not None:
+            widget.setCurrentItem(item)
+            widget.setFocus()
         on_cell_clicked(owner, widget, row, column)
 
     table.cellClicked.connect(_on_cell_clicked)
-    layout.addWidget(table, 1)
-    layer["_stop_table"] = table
-    return panel
+    return table
 
 
 def populate_linear_stop_table(table: QTableWidget, layer: dict, format_stop_value):
