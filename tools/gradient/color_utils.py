@@ -44,6 +44,16 @@ def display_color_text(text: str) -> str:
     parsed = parse_color_text(text)
     if parsed == "#00000000":
         return "transparent"
+    if parsed is None:
+        return text.strip().lower()
+    color = qcolor_from_text(parsed)
+    return color.name().lower()
+
+
+def css_color_text(text: str) -> str:
+    parsed = parse_color_text(text)
+    if parsed == "#00000000":
+        return "transparent"
     return parsed if parsed is not None else text.strip().lower()
 
 

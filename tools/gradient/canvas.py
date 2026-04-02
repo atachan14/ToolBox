@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 from typing import Callable
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
@@ -17,6 +17,7 @@ class GradientCanvasConfig:
     layers_getter: Callable[[], list[dict]]
     active_layer_getter: Callable[[], dict | None]
     active_layer_index_getter: Callable[[], int]
+    selected_stop_index_getter: Callable[[], int | None]
     active_palette_color_getter: Callable[[], str]
     cursor_changed: Callable[[str], None]
     background_clicked: Callable[[], None]
@@ -29,6 +30,17 @@ class GradientCanvasConfig:
 
 
 class GradientCanvas(QWidget):
+    DEGREE_PRESET_TO_VALUE = {
+        "to top": 0,
+        "to top right": 45,
+        "to right": 90,
+        "to bottom right": 135,
+        "to bottom": 180,
+        "to bottom left": 225,
+        "to left": 270,
+        "to top left": 315,
+    }
+
     def __init__(self, config: GradientCanvasConfig):
         super().__init__()
         self.config = config
@@ -43,8 +55,29 @@ class GradientCanvas(QWidget):
         self._pending_add_position: float | None = None
         self._pending_background_click = False
         self._stop_hit_radius = 8.0
+        self._animation_timer = QTimer(self)
+        self._animation_timer.setInterval(16)
+        self._animation_timer.timeout.connect(self._tick_view_animation)
+        self._animation_progress = 0
+        self._animation_steps = 12
+        self._animation_start_zoom = 1.0
+        self._animation_target_zoom = 1.0
+        self._animation_start_pan = QPointF(0, 0)
+        self._animation_target_pan = QPointF(0, 0)
+        self._focus_stop_layer_id: int | None = None
+        self._focus_stop_index: int | None = None
+        self._focus_progress = 0
+        self._focus_steps = 30
         self.setMouseTracking(True)
         self.setMinimumHeight(10)
+
+    def _layer_deg(self, layer: dict) -> float:
+        mode = str(layer.get("deg_mode", "input"))
+        if mode != "input":
+            preset = self.DEGREE_PRESET_TO_VALUE.get(mode)
+            if preset is not None:
+                return float(preset)
+        return float(layer.get("deg", 90))
 
     def _guide_rect_scene(self) -> QRectF:
         width = max(1.0, float(self.width()))
@@ -220,7 +253,7 @@ class GradientCanvas(QWidget):
         return image
 
     def _find_hit_stop_index(self, layer: dict, scene_point: QPointF) -> int | None:
-        deg = float(layer.get("deg", 90))
+        deg = self._layer_deg(layer)
         nearest_idx = None
         nearest_dist = float("inf")
         for idx, stop in enumerate(layer.get("stops") or []):
@@ -240,6 +273,76 @@ class GradientCanvas(QWidget):
             if layer.get("kind") == "background" and not layer.get("muted", False):
                 return QColor(str(layer.get("color", "#20252e")))
         return QColor("#20252e")
+
+    def _stop_scene_point(self, layer: dict, index: int) -> QPointF | None:
+        stops = list(layer.get("stops") or [])
+        if not (0 <= index < len(stops)):
+            return None
+        return self._position_to_scene(float(stops[index].get("position", 0.0)), self._layer_deg(layer))
+
+    def ensure_stop_visible(self, layer: dict, index: int):
+        stop_scene = self._stop_scene_point(layer, index)
+        if stop_scene is None:
+            return
+        stop_screen = self._scene_to_screen(stop_scene)
+        padding = 24.0
+        view_rect = QRectF(padding, padding, max(1.0, self.width() - padding * 2), max(1.0, self.height() - padding * 2))
+        if view_rect.contains(stop_screen):
+            self.update()
+            return
+        guide_rect = self._guide_rect_scene()
+        bounds = guide_rect.united(QRectF(stop_scene.x(), stop_scene.y(), 1.0, 1.0)).adjusted(-padding, -padding, padding, padding)
+        available_width = max(1.0, float(self.width()) - padding * 2)
+        available_height = max(1.0, float(self.height()) - padding * 2)
+        target_zoom = min(self.zoom, available_width / max(1.0, bounds.width()), available_height / max(1.0, bounds.height()))
+        target_zoom = min(8.0, max(0.3, target_zoom))
+        target_center = bounds.center()
+        target_pan = QPointF((self.width() / 2.0) - target_center.x() * target_zoom, (self.height() / 2.0) - target_center.y() * target_zoom)
+        self._start_view_animation(target_zoom, target_pan)
+
+    def focus_stop(self, layer: dict, index: int):
+        if self._stop_scene_point(layer, index) is None:
+            return
+        self._focus_stop_layer_id = id(layer)
+        self._focus_stop_index = index
+        self._focus_progress = 0
+        self._start_view_animation(self.zoom, self.pan)
+
+    def _start_view_animation(self, target_zoom: float, target_pan: QPointF):
+        self._animation_start_zoom = self.zoom
+        self._animation_target_zoom = target_zoom
+        self._animation_start_pan = QPointF(self.pan)
+        self._animation_target_pan = QPointF(target_pan)
+        self._animation_progress = 0
+        if self._animation_timer.isActive():
+            self._animation_timer.stop()
+        if abs(self._animation_start_zoom - target_zoom) <= 1e-6 and (self._animation_start_pan - target_pan).manhattanLength() <= 0.5:
+            self.zoom = target_zoom
+            self.pan = QPointF(target_pan)
+            if self._focus_stop_index is not None:
+                self._animation_progress = 0
+                self._animation_timer.start()
+            self.update()
+            return
+        self._animation_timer.start()
+
+    def _tick_view_animation(self):
+        self._animation_progress += 1
+        progress = min(1.0, self._animation_progress / max(1, self._animation_steps))
+        eased = 1.0 - ((1.0 - progress) ** 3)
+        self.zoom = self._animation_start_zoom + (self._animation_target_zoom - self._animation_start_zoom) * eased
+        self.pan = QPointF(
+            self._animation_start_pan.x() + (self._animation_target_pan.x() - self._animation_start_pan.x()) * eased,
+            self._animation_start_pan.y() + (self._animation_target_pan.y() - self._animation_start_pan.y()) * eased,
+        )
+        if self._focus_stop_index is not None:
+            self._focus_progress = min(self._focus_steps, self._focus_progress + 1)
+            if self._focus_progress >= self._focus_steps:
+                self._focus_stop_layer_id = None
+                self._focus_stop_index = None
+        self.update()
+        if progress >= 1.0 and self._focus_stop_index is None:
+            self._animation_timer.stop()
 
     def mousePressEvent(self, event: QMouseEvent):
         self.setFocus()
@@ -269,7 +372,7 @@ class GradientCanvas(QWidget):
                 self._dragging_stop_index = hit_index
                 self.config.interaction_started()
                 return
-            deg = float(active_layer.get("deg", 90))
+            deg = self._layer_deg(active_layer)
             self._pending_add_position = self._snap_position(self._project_point_to_position(scene_pos, deg), deg)
             self._hover_position = self._pending_add_position
             self.config.linear_stop_hovered(self._hover_position)
@@ -299,7 +402,7 @@ class GradientCanvas(QWidget):
             self.config.cursor_changed(f"Cursor: x={x_n * 100:.2f}%, y={y_n * 100:.2f}%")
         active_layer = self.config.active_layer_getter()
         if active_layer and not active_layer.get("muted", False) and active_layer.get("kind") == "linear":
-            deg = float(active_layer.get("deg", 90))
+            deg = self._layer_deg(active_layer)
             if self._dragging_stop_index is not None or self._pending_add_position is not None:
                 self._hover_position = self._snap_position(self._project_point_to_position(scene_pos, deg), deg)
             else:
@@ -356,7 +459,7 @@ class GradientCanvas(QWidget):
             self.update()
             return
         if self._pending_add_position is not None:
-            deg = float(active_layer.get("deg", 90))
+            deg = self._layer_deg(active_layer)
             final_position = self._snap_position(self._project_point_to_position(scene_pos, deg), deg)
             self.config.linear_stop_clicked(final_position)
         self._pending_add_position = None
@@ -400,7 +503,7 @@ class GradientCanvas(QWidget):
                 continue
             kind = layer.get("kind")
             if kind == "linear":
-                deg = float(layer.get("deg", 90))
+                deg = self._layer_deg(layer)
                 min_position, max_position = self._position_range_for_scene_rect(guide_scene, deg)
                 start_point = self._position_to_scene(min_position, deg)
                 end_point = self._position_to_scene(max_position, deg)
@@ -470,7 +573,7 @@ class GradientCanvas(QWidget):
 
         active_layer = self.config.active_layer_getter()
         if guide_enabled and active_layer and active_layer.get("kind") == "linear":
-            deg = float(active_layer.get("deg", 90))
+            deg = self._layer_deg(active_layer)
             direction = self._gradient_direction(deg)
             center = QPointF(guide_scene.center().x(), guide_scene.center().y())
             half_span = self._gradient_half_span(direction)
@@ -488,6 +591,23 @@ class GradientCanvas(QWidget):
                 painter.setPen(QPen(QColor("#111827"), 1))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawEllipse(point, 7, 7)
+            if self._focus_stop_index is not None and self._focus_stop_layer_id == id(active_layer):
+                focused_stop = self._stop_scene_point(active_layer, self._focus_stop_index)
+                if focused_stop is not None:
+                    focused_point = self._scene_to_screen(focused_stop)
+                    progress = min(1.0, self._focus_progress / max(1, self._focus_steps))
+                    eased = 1.0 - ((1.0 - progress) ** 3)
+                    outer_radius = 18.0 - (10.0 * eased)
+                    inner_radius = max(7.0, outer_radius - 3.0)
+                    outer_color = QColor("#4ecdc4")
+                    outer_color.setAlphaF(max(0.0, 1.0 - eased))
+                    inner_color = QColor("#f8fafc")
+                    inner_color.setAlphaF(max(0.0, 0.9 - eased))
+                    painter.setPen(QPen(outer_color, 3))
+                    painter.setBrush(Qt.NoBrush)
+                    painter.drawEllipse(focused_point, outer_radius, outer_radius)
+                    painter.setPen(QPen(inner_color, 2))
+                    painter.drawEllipse(focused_point, inner_radius, inner_radius)
             if self._hover_position is not None and self._pending_add_position is not None:
                 hover_point = self._scene_to_screen(self._position_to_scene(self._hover_position, deg))
                 painter.setPen(QPen(QColor("#4ecdc4"), 1))

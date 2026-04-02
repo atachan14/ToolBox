@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .color_utils import combine_color_and_alpha, display_color_text, parse_color_text, split_color_and_alpha
+from .color_utils import combine_color_and_alpha, css_color_text, display_color_text, parse_color_text, split_color_and_alpha
 
 
 def visible_stops(layer: dict) -> list[dict]:
@@ -21,7 +21,7 @@ def linear_stops_css(layer: dict, format_stop_value) -> str:
         if color == run_color:
             run_end = position
             continue
-        color_text = display_color_text(run_color)
+        color_text = css_color_text(run_color)
         if abs(run_end - run_start) <= 1e-9:
             parts.append(f"{color_text} {format_stop_value(layer, run_start)}")
         else:
@@ -29,7 +29,7 @@ def linear_stops_css(layer: dict, format_stop_value) -> str:
         run_color = color
         run_start = position
         run_end = position
-    color_text = display_color_text(run_color)
+    color_text = css_color_text(run_color)
     if abs(run_end - run_start) <= 1e-9:
         parts.append(f"{color_text} {format_stop_value(layer, run_start)}")
     else:

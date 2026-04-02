@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QBrush
-from PySide6.QtWidgets import QAbstractItemView, QCheckBox, QFrame, QHeaderView, QHBoxLayout, QLabel, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractItemView, QCheckBox, QComboBox, QFrame, QHeaderView, QHBoxLayout, QLabel, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from .color_utils import display_color_text, split_color_and_alpha
 from .widgets import AlphaPatternLineEdit, alpha_pattern_text_color
@@ -149,6 +149,26 @@ def style_color_value_widget(widget: QWidget, color: str):
         widget.set_pattern_color(color)
 
 
+DEGREE_PRESETS = [
+    ("input", None),
+    ("to top", 0),
+    ("to top right", 45),
+    ("to right", 90),
+    ("to bottom right", 135),
+    ("to bottom", 180),
+    ("to bottom left", 225),
+    ("to left", 270),
+    ("to top left", 315),
+]
+
+
+def _preset_index_for_mode(mode: str) -> int:
+    for index, (label, _preset_deg) in enumerate(DEGREE_PRESETS):
+        if label == mode:
+            return index
+    return 0
+
+
 def build_background_inspector(layer: dict, on_item_changed, on_context_requested, on_color_dropped) -> QWidget:
     panel = QWidget()
     layout = QVBoxLayout(panel)
@@ -174,7 +194,7 @@ def build_background_inspector(layer: dict, on_item_changed, on_context_requeste
     return panel
 
 
-def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_repeat_changed, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped, column_widths, on_column_resized) -> QWidget:
+def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_deg_mode_changed, on_repeat_changed, on_cell_clicked, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped, column_widths, on_column_resized) -> QWidget:
     panel = QWidget()
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(8, 8, 8, 8)
@@ -182,21 +202,48 @@ def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_re
 
     controls = QFrame()
     controls.setFrameShape(QFrame.StyledPanel)
-    controls_layout = QHBoxLayout(controls)
-    controls_layout.setContentsMargins(8, 8, 8, 8)
+    controls_layout = QVBoxLayout(controls)
+    controls_layout.setContentsMargins(6, 6, 6, 6)
     controls_layout.setSpacing(4)
-    controls_layout.addWidget(QLabel("deg"))
+
+    repeat_row = QHBoxLayout()
+    repeat_row.setContentsMargins(0, 0, 0, 0)
+    repeat_row.setSpacing(4)
+    repeat_check = QCheckBox("repeat")
+    repeat_check.setChecked(bool(layer.get("repeat", False)))
+    repeat_check.toggled.connect(lambda checked, item=layer: on_repeat_changed(item, checked))
+    repeat_row.addWidget(repeat_check)
+    repeat_row.addStretch(1)
+    controls_layout.addLayout(repeat_row)
+
+    deg_row = QHBoxLayout()
+    deg_row.setContentsMargins(0, 0, 0, 0)
+    deg_row.setSpacing(4)
+    deg_row.addWidget(QLabel("deg"))
+    deg_select = QComboBox()
+    for label, preset_deg in DEGREE_PRESETS:
+        deg_select.addItem(label, preset_deg)
+    deg_select.setCurrentIndex(_preset_index_for_mode(str(layer.get("deg_mode", "input"))))
+    deg_row.addWidget(deg_select, 1)
     deg_input = QSpinBox()
     deg_input.setRange(0, 360)
     deg_input.setValue(int(layer.get("deg", 90)))
     deg_input.setButtonSymbols(QSpinBox.NoButtons)
     deg_input.valueChanged.connect(lambda value, item=layer: on_deg_changed(item, value))
-    controls_layout.addWidget(deg_input)
-    controls_layout.addStretch(1)
-    repeat_check = QCheckBox("repeat")
-    repeat_check.setChecked(bool(layer.get("repeat", False)))
-    repeat_check.toggled.connect(lambda checked, item=layer: on_repeat_changed(item, checked))
-    controls_layout.addWidget(repeat_check)
+    deg_input.setEnabled(deg_select.currentData() is None)
+    deg_row.addWidget(deg_input)
+    controls_layout.addLayout(deg_row)
+
+    def _on_deg_select_changed(_index: int, item=layer, combo=deg_select, spin=deg_input):
+        preset_deg = combo.currentData()
+        is_input = preset_deg is None
+        spin.setEnabled(is_input)
+        if not is_input:
+            on_deg_mode_changed(item, str(combo.currentText()))
+        else:
+            on_deg_mode_changed(item, "input")
+
+    deg_select.currentIndexChanged.connect(_on_deg_select_changed)
     layout.addWidget(controls)
 
     table = StopTableWidget(0, 3)
@@ -220,7 +267,13 @@ def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_re
     table.colorDropped.connect(lambda row, color, owner=layer: on_color_dropped(owner, row, color))
     table.horizontalHeader().sectionResized.connect(lambda section, _old, new, widget=table: on_column_resized(widget, section, new))
     populate_linear_stop_table(table, layer, format_stop_value)
-    table.cellClicked.connect(lambda row, _column, owner=layer, widget=table: on_add_requested(owner) if row == widget.rowCount() - 1 else None)
+    def _on_cell_clicked(row: int, column: int, owner=layer, widget=table):
+        if row == widget.rowCount() - 1:
+            on_add_requested(owner)
+            return
+        on_cell_clicked(owner, widget, row, column)
+
+    table.cellClicked.connect(_on_cell_clicked)
     layout.addWidget(table, 1)
     layer["_stop_table"] = table
     return panel

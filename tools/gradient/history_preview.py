@@ -127,7 +127,7 @@ def render_history_preview_pixmap(entry: dict, size: QSize, canvas) -> QPixmap:
     for layer in layers:
         if not isinstance(layer, dict) or layer.get("muted", False) or layer.get("kind") != "linear":
             continue
-        deg = float(layer.get("deg", 90))
+        deg = canvas._layer_deg(layer)
         guide_rect_f = QRectF(guide_rect)
         min_position, max_position = position_range_for_rect(guide_rect_f, deg)
         start_point = position_to_point(guide_rect_f, min_position, deg)

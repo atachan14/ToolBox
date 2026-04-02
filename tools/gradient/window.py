@@ -34,6 +34,16 @@ class GradientWindow(QMainWindow):
     ]
 
     parse_color_text = staticmethod(parse_color_text)
+    DEGREE_PRESET_TO_VALUE = {
+        "to top": 0,
+        "to top right": 45,
+        "to right": 90,
+        "to bottom right": 135,
+        "to bottom": 180,
+        "to bottom left": 225,
+        "to left": 270,
+        "to top left": 315,
+    }
 
     def __init__(self, state_path: Path | None = None, history_path: Path | None = None, tool_data_dir: Path | None = None):
         super().__init__()
@@ -54,6 +64,7 @@ class GradientWindow(QMainWindow):
         self._history_dialog_width = self.DEFAULT_HISTORY_DIALOG_WIDTH
         self._history_dialog_height = self.DEFAULT_HISTORY_DIALOG_HEIGHT
         self._stop_table_column_widths = [52, 48, 52]
+        self._selected_stop_index: int | None = None
         self._undo_stack: list[dict] = []
         self._redo_stack: list[dict] = []
         self._applying_undo_redo = False
@@ -95,6 +106,7 @@ class GradientWindow(QMainWindow):
                 layers_getter=lambda: self.layers,
                 active_layer_getter=self._active_layer,
                 active_layer_index_getter=lambda: self.inspector_tabs.currentIndex(),
+                selected_stop_index_getter=lambda: self._selected_stop_index,
                 active_palette_color_getter=lambda: self.selected_palette_color,
                 cursor_changed=self._set_cursor_text,
                 background_clicked=self._apply_palette_to_background_from_canvas,
@@ -203,11 +215,19 @@ class GradientWindow(QMainWindow):
         rad = math.radians(deg)
         return max(1e-6, abs(math.sin(rad)) * width + abs(math.cos(rad)) * height)
 
+    def _layer_effective_deg(self, layer: dict) -> float:
+        mode = str(layer.get("deg_mode", "input"))
+        if mode != "input":
+            preset_value = self.DEGREE_PRESET_TO_VALUE.get(mode)
+            if preset_value is not None:
+                return float(preset_value)
+        return float(layer.get("deg", 90))
+
     def _format_stop_value(self, layer: dict, position: float) -> str:
         def _compact(number: float) -> str:
             return str(int(round(number))) if abs(number - round(number)) < 1e-9 else f"{number:.2f}"
         if self._unit_name() == "px":
-            return f"{_compact(position * self._gradient_span(float(layer.get('deg', 90))))}px"
+            return f"{_compact(position * self._gradient_span(self._layer_effective_deg(layer)))}px"
         return f"{_compact(position * 100.0)}%"
 
     def _parse_stop_value(self, layer: dict, text: str) -> float | None:
@@ -218,7 +238,7 @@ class GradientWindow(QMainWindow):
         try:
             if value_text.endswith("px"):
                 numeric = float(value_text[:-2].strip())
-                return numeric / self._gradient_span(float(layer.get("deg", 90)))
+                return numeric / self._gradient_span(self._layer_effective_deg(layer))
             if value_text.endswith("%"):
                 numeric = float(value_text[:-1].strip())
                 return numeric / 100.0
@@ -226,7 +246,7 @@ class GradientWindow(QMainWindow):
         except ValueError:
             return None
         if unit == "px":
-            return numeric / self._gradient_span(float(layer.get("deg", 90)))
+            return numeric / self._gradient_span(self._layer_effective_deg(layer))
         return numeric / 100.0
 
     def _set_cursor_text(self, text: str):
@@ -405,6 +425,7 @@ class GradientWindow(QMainWindow):
         layers_state = state.get("layers") if isinstance(state, dict) else None
         if not isinstance(state, dict) or not isinstance(layers_state, list):
             return
+        self._selected_stop_index = None
 
         self.toolbar.size_h.setValue(max(1, int(state.get("size_h", 100))))
         self.toolbar.size_w.setValue(max(1, int(state.get("size_w", 100))))
@@ -437,7 +458,7 @@ class GradientWindow(QMainWindow):
         return f"{prefix}{index}"
 
     def _new_layer(self, kind: str) -> dict:
-        return {"kind": kind, "name": self._layer_default_name(kind), "deg": 90, "repeat": False, "stops": [], "muted": False}
+        return {"kind": kind, "name": self._layer_default_name(kind), "deg": 90, "deg_mode": "input", "repeat": False, "stops": [], "muted": False}
 
     def _new_background_layer(self) -> dict:
         return {"kind": "background", "name": "b", "color": "#00000000", "muted": False}
@@ -480,7 +501,9 @@ class GradientWindow(QMainWindow):
                 layer,
                 self._format_stop_value,
                 self._on_layer_deg_changed,
+                self._on_layer_deg_mode_changed,
                 self._on_layer_repeat_changed,
+                self._on_stop_table_cell_clicked,
                 self._on_stop_table_item_changed,
                 self._on_stop_table_context_requested,
                 self._on_stop_table_step_requested,
@@ -497,6 +520,12 @@ class GradientWindow(QMainWindow):
         populate_linear_stop_table(table, layer, self._format_stop_value)
         for index, width in enumerate(self._stop_table_column_widths):
             table.setColumnWidth(index, width)
+        if layer is self._active_layer() and self._selected_stop_index is not None:
+            stops = list(layer.get("stops") or [])
+            if 0 <= self._selected_stop_index < len(stops):
+                selected_item = table.item(self._selected_stop_index, 0)
+                if selected_item is not None:
+                    table.setCurrentItem(selected_item)
         self._table_syncing = False
 
     def _on_stop_table_column_resized(self, source_table: QTableWidget, section: int, width: int):
@@ -586,6 +615,17 @@ class GradientWindow(QMainWindow):
             return
         self._refresh_all()
 
+    def _on_stop_table_cell_clicked(self, layer: dict, table: QTableWidget, row: int, _column: int):
+        stops = list(layer.get("stops") or [])
+        if not (0 <= row < len(stops)):
+            return
+        self._selected_stop_index = row
+        current_item = table.item(row, 0)
+        if current_item is not None:
+            table.setCurrentItem(current_item)
+        self.canvas.ensure_stop_visible(layer, row)
+        self.canvas.focus_stop(layer, row)
+
     def _on_stop_table_context_requested(self, layer: dict, table: QTableWidget, pos: QPoint):
         item = table.itemAt(pos)
         if item is None:
@@ -619,8 +659,9 @@ class GradientWindow(QMainWindow):
             self._refresh_all()
 
     def _on_stop_table_step_requested(self, layer: dict, table: QTableWidget, row: int, column: int, delta: int):
-        if not step_stop(layer, row, column, delta, self._unit_name(), self._gradient_span(float(layer.get("deg", 90)))):
+        if not step_stop(layer, row, column, delta, self._unit_name(), self._gradient_span(self._layer_effective_deg(layer))):
             return
+        self._selected_stop_index = row
         self._refresh_all()
         current_item = table.item(row, column)
         if current_item is not None:
@@ -629,6 +670,13 @@ class GradientWindow(QMainWindow):
     def _on_stop_table_reorder_requested(self, layer: dict, source_row: int, target_row: int):
         if not reorder_stop(layer, source_row, target_row):
             return
+        if self._selected_stop_index == source_row:
+            self._selected_stop_index = target_row
+        elif self._selected_stop_index is not None:
+            if source_row < self._selected_stop_index <= target_row:
+                self._selected_stop_index -= 1
+            elif target_row <= self._selected_stop_index < source_row:
+                self._selected_stop_index += 1
         self._refresh_all()
         table = layer.get("_stop_table")
         if isinstance(table, QTableWidget):
@@ -637,12 +685,14 @@ class GradientWindow(QMainWindow):
                 table.setCurrentItem(target_item)
 
     def _on_stop_table_add_requested(self, layer: dict):
-        append_stop_after_last(layer, self.selected_palette_color, self._unit_name(), self._gradient_span(float(layer.get("deg", 90))))
+        append_stop_after_last(layer, self.selected_palette_color, self._unit_name(), self._gradient_span(self._layer_effective_deg(layer)))
+        self._selected_stop_index = len(layer.get("stops", [])) - 1
         self._refresh_all()
 
     def _on_stop_table_color_dropped(self, layer: dict, row: int, color: str):
         if not set_stop_color(layer, row, color):
             return
+        self._selected_stop_index = row
         self._refresh_all()
 
     def _refresh_active_table(self):
@@ -656,6 +706,10 @@ class GradientWindow(QMainWindow):
         layer["deg"] = value
         self._refresh_all()
 
+    def _on_layer_deg_mode_changed(self, layer: dict, mode: str):
+        layer["deg_mode"] = mode
+        self._refresh_all()
+
     def _on_layer_repeat_changed(self, layer: dict, checked: bool):
         layer["repeat"] = checked
         self._refresh_all()
@@ -665,6 +719,7 @@ class GradientWindow(QMainWindow):
         if not layer or layer.get("kind") != "linear":
             return
         append_stop(layer, self.selected_palette_color, position)
+        self._selected_stop_index = len(layer.get("stops", [])) - 1
         self._refresh_all()
 
     def _move_stop_from_canvas(self, index: int, position: float):
@@ -673,6 +728,7 @@ class GradientWindow(QMainWindow):
             return
         if not move_stop(layer, index, position):
             return
+        self._selected_stop_index = index
         self._refresh_all()
 
     def _delete_stop_from_canvas(self, index: int):
@@ -681,6 +737,11 @@ class GradientWindow(QMainWindow):
             return
         if not delete_stop(layer, index):
             return
+        stops = list(layer.get("stops") or [])
+        if not stops:
+            self._selected_stop_index = None
+        elif self._selected_stop_index is not None:
+            self._selected_stop_index = max(0, min(self._selected_stop_index, len(stops) - 1))
         self._refresh_all()
 
     def _gradient_css(self, layer: dict) -> str:
@@ -688,7 +749,9 @@ class GradientWindow(QMainWindow):
         if kind == "linear":
             repeat_prefix = "repeating-" if layer.get("repeat") else ""
             stops_text = self._linear_stops_css(layer)
-            return f"{repeat_prefix}linear-gradient({int(layer.get('deg', 90))}deg, {stops_text})"
+            deg_mode = str(layer.get("deg_mode", "input"))
+            deg_text = deg_mode if deg_mode != "input" else f"{int(layer.get('deg', 90))}deg"
+            return f"{repeat_prefix}linear-gradient({deg_text}, {stops_text})"
         if kind == "radial":
             return "radial-gradient(/* pending */)"
         return "conic-gradient(/* pending */)"
@@ -721,6 +784,13 @@ class GradientWindow(QMainWindow):
         self._refresh_all()
 
     def _on_tab_changed(self, *_):
+        layer = self._active_layer()
+        if not layer or layer.get("kind") != "linear":
+            self._selected_stop_index = None
+        else:
+            stops = list(layer.get("stops") or [])
+            if self._selected_stop_index is not None and not (0 <= self._selected_stop_index < len(stops)):
+                self._selected_stop_index = None
         if not self._building_tabs:
             self._refresh_all()
 
@@ -804,6 +874,7 @@ class GradientWindow(QMainWindow):
         self.state_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _reset_state(self):
+        self._selected_stop_index = None
         self.toolbar.size_h.setValue(100)
         self.toolbar.size_w.setValue(100)
         self.toolbar.unit_px.setChecked(False)
