@@ -140,21 +140,21 @@ def render_history_preview_pixmap(entry: dict, size: QSize, canvas) -> QPixmap:
             sample_count = max(256, int(math.ceil(half_span * 2.0)))
             axis_aligned = canvas._axis_aligned_deg(deg)
             if axis_aligned in (90.0, 270.0):
-                strip = canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=False)
+                strip = canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=False, target_rect=guide_rect_f)
                 painter.drawImage(
                     QRectF(center.x() - half_span, center.y() - thickness / 2.0, half_span * 2.0, thickness),
                     strip,
                     QRectF(0.0, 0.0, float(strip.width()), 1.0),
                 )
             elif axis_aligned in (0.0, 180.0):
-                strip = canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=True)
+                strip = canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=True, target_rect=guide_rect_f)
                 painter.drawImage(
                     QRectF(center.x() - thickness / 2.0, center.y() - half_span, thickness, half_span * 2.0),
                     strip,
                     QRectF(0.0, 0.0, 1.0, float(strip.height())),
                 )
             else:
-                strip = canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=False)
+                strip = canvas._build_linear_strip_image(layer, sample_count, min_position, max_position, vertical=False, target_rect=guide_rect_f)
                 painter.save()
                 painter.translate(center)
                 painter.rotate(deg - 90.0)

@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 
-def build_clamp(min_px: float, max_px: float, min_view: float, max_view: float) -> tuple[bool, str]:
+def build_clamp(
+    min_px: float,
+    max_px: float,
+    min_view: float,
+    max_view: float,
+    unit: str = "px",
+) -> tuple[bool, str]:
     """Build CSS clamp expression from pixel and viewport ranges."""
     if min_view == max_view:
         return False, "min view と max view が同じです"
@@ -18,8 +24,9 @@ def build_clamp(min_px: float, max_px: float, min_view: float, max_view: float) 
 
     sign = "+" if slope >= 0 else "-"
     slope_abs = abs(slope)
+    unit = "%" if unit == "%" else "px"
 
     clamp = (
-        f"clamp({low:g}px, calc({intercept:.2f}px {sign} {slope_abs:.2f}vw), {high:g}px)"
+        f"clamp({low:g}{unit}, calc({intercept:.2f}{unit} {sign} {slope_abs:.2f}vw), {high:g}{unit})"
     )
     return True, clamp

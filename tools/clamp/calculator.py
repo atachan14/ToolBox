@@ -24,6 +24,8 @@ class ClampCalculator(QWidget):
         self.tool = tool
         self.last_edited = None
         self._current_result_text = "clamp(...)"
+        self._result_unit = "px"
+        self._result_values = None
 
         self.setup_ui()
         self.setup_signals()
@@ -74,12 +76,26 @@ class ClampCalculator(QWidget):
         layout.addStretch()
         
         # result button
+        result_row = QHBoxLayout()
+        result_row.setContentsMargins(0, 0, 0, 0)
+        result_row.setSpacing(8)
+
         self.result_label = QLabel(self._current_result_text)
         self.result_label.setWordWrap(True)
         self.result_label.setProperty("state", "start")
         self.result_label.setCursor(Qt.PointingHandCursor)
- 
-        layout.addWidget(self.result_label)
+
+        self.unit_toggle = QPushButton("px")
+        self.unit_toggle.setObjectName("unitToggle")
+        self.unit_toggle.setCheckable(True)
+        self.unit_toggle.setCursor(Qt.PointingHandCursor)
+        self.unit_toggle.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.unit_toggle.setFixedWidth(28)
+
+        result_row.addWidget(self.result_label, 1)
+        result_row.addWidget(self.unit_toggle, 0, Qt.AlignTop)
+
+        layout.addLayout(result_row)
 
         ## 余白はここ
         layout.addStretch()
@@ -109,6 +125,14 @@ class ClampCalculator(QWidget):
                 border: 1px solid #4ecdc4;
                 background: rgba(78, 205, 196, 0.12);
             }
+            QPushButton#unitToggle,
+            QPushButton#unitToggle:hover,
+            QPushButton#unitToggle:pressed,
+            QPushButton#unitToggle:checked,
+            QPushButton#unitToggle:checked:hover,
+            QPushButton#unitToggle:checked:pressed {
+                background-color: #333333;
+            }
             QLabel[state="error"] { color: #ff6b6b; }
             QLabel[state="copied"] { color: #4ecdc4; }
             """
@@ -118,6 +142,7 @@ class ClampCalculator(QWidget):
         self.calc_button.clicked.connect(self.calc_exe)
         self.reset_button.clicked.connect(self.reset_all)
         self.result_label.mousePressEvent = lambda e: self.copy_result()
+        self.unit_toggle.clicked.connect(self.toggle_result_unit)
 
         self.free_input.installEventFilter(self)
         for w in (self.min_px, self.max_px, self.min_view, self.max_view):
@@ -216,18 +241,18 @@ class ClampCalculator(QWidget):
             self.error_result("数値を入力してください")
             return
 
-        ok, payload = build_clamp(min_px, max_px, min_view, max_view)
+        ok, payload = build_clamp(
+            min_px,
+            max_px,
+            min_view,
+            max_view,
+            unit=self._result_unit,
+        )
         if not ok:
             self.error_result(payload)
             return
 
-        self.success_result(
-            payload,
-            min_px,
-            min_view,
-            max_view,
-            max_px,
-        )
+        self.success_result(min_px, min_view, max_view, max_px)
 
     def reverse_exe(self):
         self.flash_box(self.reverse_box)
@@ -241,8 +266,10 @@ class ClampCalculator(QWidget):
         try:
             inner = text[6:-1]
             min_px_raw, calc_part, max_px_raw = inner.split(",")
-            min_px = float(min_px_raw.replace("px", ""))
-            max_px = float(max_px_raw.replace("px", ""))
+            min_px, clamp_unit = self._parse_value_with_unit(min_px_raw)
+            max_px, max_unit = self._parse_value_with_unit(max_px_raw)
+            if max_unit != clamp_unit:
+                raise ValueError("mixed units")
 
             calc_inner = calc_part.replace("calc(", "").replace(")", "")
             if "+" in calc_inner:
@@ -254,12 +281,14 @@ class ClampCalculator(QWidget):
             else:
                 raise ValueError("missing +/- in calc")
 
-            if "px" in left:
+            if left.endswith("px") or left.endswith("%"):
                 px_part, vw_part = left, right
             else:
                 px_part, vw_part = right, left
 
-            base_px = float(px_part.replace("px", ""))
+            base_px, base_unit = self._parse_value_with_unit(px_part)
+            if base_unit != clamp_unit:
+                raise ValueError("mixed units")
             vw = float(vw_part.replace("vw", "")) * sign
 
             if vw == 0:
@@ -323,14 +352,8 @@ class ClampCalculator(QWidget):
         self.max_px.setText(f"{max_px:g}")
         self.min_view.setText(str(min_view))
         self.max_view.setText(str(max_view))
-
-        self.success_result(
-            original_text,
-            min_px,
-            min_view,
-            max_view,
-            max_px,
-        )
+        self.set_result_unit(clamp_unit, save_state=False)
+        self.success_result(min_px, min_view, max_view, max_px)
 
     def run_from_history(self, entry):
         self.min_px.setText(f"{float(entry.get('min_px', 0)):g}")
@@ -344,17 +367,26 @@ class ClampCalculator(QWidget):
 
     def success_result(
         self,
-        clamp: str,
         min_px=None,
         min_view=None,
         max_view=None,
         max_px=None,
     ):
+        clamp = self._build_result_text(min_px, min_view, max_view, max_px)
+        if clamp is None:
+            self.error_result("error")
+            return
+
         min_px = f"{min_px:g}"
         min_view = f"{min_view:g}"
         max_view = f"{max_view:g}"
         max_px = f"{max_px:g}"
-        
+        self._result_values = (
+            float(min_px),
+            float(max_px),
+            float(min_view),
+            float(max_view),
+        )
         self._current_result_text = clamp
         self.result_label.setText(clamp)
 
@@ -375,6 +407,7 @@ class ClampCalculator(QWidget):
             )
 
     def error_result(self, message: str):
+        self._result_values = None
         self._current_result_text = message
         self.result_label.setText(message)
         self.result_label.setProperty("state", "error")
@@ -408,6 +441,7 @@ class ClampCalculator(QWidget):
         self.max_view.clear()
         self.reverse_input.clear()
 
+        self._result_values = None
         self._current_result_text = "clamp(...)"
         self.result_label.setText(self._current_result_text)
         self.result_label.setProperty("state", "start")
@@ -421,3 +455,43 @@ class ClampCalculator(QWidget):
         self.free_input.setFocus()
         if hasattr(self.tool, "_save_state"):
             self.tool._save_state()
+
+    def toggle_result_unit(self):
+        unit = "%" if self.unit_toggle.isChecked() else "px"
+        self.set_result_unit(unit)
+
+    def set_result_unit(self, unit: str, save_state: bool = True):
+        self._result_unit = "%" if unit == "%" else "px"
+        self.unit_toggle.blockSignals(True)
+        self.unit_toggle.setChecked(self._result_unit == "%")
+        self.unit_toggle.setText(self._result_unit)
+        self.unit_toggle.blockSignals(False)
+
+        if self._result_values and self.result_label.property("state") in {"success", "copied"}:
+            min_px, max_px, min_view, max_view = self._result_values
+            clamp = self._build_result_text(min_px, min_view, max_view, max_px)
+            if clamp:
+                self._current_result_text = clamp
+                if self.result_label.property("state") != "copied":
+                    self.result_label.setText(clamp)
+
+        if save_state and hasattr(self.tool, "_save_state"):
+            self.tool._save_state()
+
+    def _build_result_text(self, min_px, min_view, max_view, max_px):
+        ok, payload = build_clamp(
+            float(min_px),
+            float(max_px),
+            float(min_view),
+            float(max_view),
+            unit=self._result_unit,
+        )
+        return payload if ok else None
+
+    def _parse_value_with_unit(self, text: str) -> tuple[float, str]:
+        value_text = text.strip()
+        if value_text.endswith("px"):
+            return float(value_text[:-2]), "px"
+        if value_text.endswith("%"):
+            return float(value_text[:-1]), "%"
+        raise ValueError("missing unit")

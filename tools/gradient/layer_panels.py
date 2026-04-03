@@ -1,8 +1,24 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QColor, QCursor, QBrush
-from PySide6.QtWidgets import QAbstractItemView, QCheckBox, QComboBox, QFrame, QHeaderView, QHBoxLayout, QLabel, QLineEdit, QSpinBox, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtGui import QBrush, QColor, QCursor
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QHeaderView,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QStyledItemDelegate,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .color_utils import display_color_text, split_color_and_alpha
 from .widgets import AlphaPatternLineEdit, alpha_pattern_text_color
@@ -154,7 +170,9 @@ class StopTableItemDelegate(QStyledItemDelegate):
                 step_editor = StepLineEdit(parent)
                 step_editor.setFrame(editor.hasFrame())
                 step_editor.setAlignment(editor.alignment())
-                step_editor.stepRequested.connect(lambda delta, row=index.row(), column=index.column(), widget=table: widget.stepRequested.emit(row, column, delta))
+                step_editor.stepRequested.connect(
+                    lambda delta, row=index.row(), column=index.column(), widget=table: widget.stepRequested.emit(row, column, delta)
+                )
                 return step_editor
         return editor
 
@@ -225,7 +243,22 @@ def build_background_inspector(layer: dict, on_item_changed, on_context_requeste
     return panel
 
 
-def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_deg_mode_changed, on_repeat_changed, on_cell_clicked, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped, column_widths, on_column_resized) -> QWidget:
+def build_linear_inspector(
+    layer: dict,
+    format_stop_value,
+    on_deg_changed,
+    on_deg_mode_changed,
+    on_repeat_changed,
+    on_cell_clicked,
+    on_item_changed,
+    on_context_requested,
+    on_step_requested,
+    on_reorder_requested,
+    on_add_requested,
+    on_color_dropped,
+    column_widths,
+    on_column_resized,
+) -> QWidget:
     panel = QWidget()
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(8, 8, 8, 8)
@@ -277,14 +310,43 @@ def build_linear_inspector(layer: dict, format_stop_value, on_deg_changed, on_de
     deg_select.currentIndexChanged.connect(_on_deg_select_changed)
     layout.addWidget(controls)
 
-    table = _build_stop_table(layer, format_stop_value, on_cell_clicked, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped, column_widths, on_column_resized)
+    table = _build_stop_table(
+        layer,
+        format_stop_value,
+        on_cell_clicked,
+        on_item_changed,
+        on_context_requested,
+        on_step_requested,
+        on_reorder_requested,
+        on_add_requested,
+        on_color_dropped,
+        column_widths,
+        on_column_resized,
+    )
     populate_linear_stop_table(table, layer, format_stop_value)
     layout.addWidget(table, 1)
     layer["_stop_table"] = table
     return panel
 
 
-def build_radial_inspector(layer: dict, format_position_value, on_center_changed, on_center_step_requested, on_repeat_changed, on_cell_clicked, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped, column_widths, on_column_resized) -> QWidget:
+def build_radial_inspector(
+    layer: dict,
+    format_position_value,
+    on_center_changed,
+    on_center_step_requested,
+    on_shape_changed,
+    on_center_unit_changed,
+    on_repeat_changed,
+    on_cell_clicked,
+    on_item_changed,
+    on_context_requested,
+    on_step_requested,
+    on_reorder_requested,
+    on_add_requested,
+    on_color_dropped,
+    column_widths,
+    on_column_resized,
+) -> QWidget:
     panel = QWidget()
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(8, 8, 8, 8)
@@ -306,42 +368,93 @@ def build_radial_inspector(layer: dict, format_position_value, on_center_changed
     repeat_row.addStretch(1)
     controls_layout.addLayout(repeat_row)
 
-    center_row = QHBoxLayout()
-    center_row.setContentsMargins(0, 0, 0, 0)
-    center_row.setSpacing(4)
-    center_row.addWidget(QLabel("cx"))
-    cx_input = StepLineEdit(format_position_value(layer, float(layer.get("center_x", 0.5)), axis="x"))
-    center_row.addWidget(cx_input, 1)
-    center_row.addWidget(QLabel("cy"))
-    cy_input = StepLineEdit(format_position_value(layer, float(layer.get("center_y", 0.5)), axis="y"))
-    center_row.addWidget(cy_input, 1)
+    shape_row = QHBoxLayout()
+    shape_row.setContentsMargins(0, 0, 0, 0)
+    shape_row.setSpacing(4)
+    shape_row.addWidget(QLabel("shape"))
+    shape_select = QComboBox()
+    shape_select.addItems(["circle", "ellipse"])
+    shape_select.setCurrentText(str(layer.get("shape", "circle")))
+    shape_select.currentTextChanged.connect(lambda value, item=layer: on_shape_changed(item, value))
+    shape_row.addWidget(shape_select, 1)
+    controls_layout.addLayout(shape_row)
+
+    cx_row = QHBoxLayout()
+    cx_row.setContentsMargins(0, 0, 0, 0)
+    cx_row.setSpacing(4)
+    cx_row.addWidget(QLabel("cx"))
+    cx_input = StepLineEdit(format_position_value(layer, axis="x"))
+    cx_row.addWidget(cx_input, 1)
+    cx_unit_toggle = QPushButton(str(layer.get("center_x_unit", "%")))
+    cx_unit_toggle.setFixedWidth(40)
+    cx_unit_toggle.clicked.connect(lambda _checked=False, item=layer, button=cx_unit_toggle: on_center_unit_changed(item, "x", "%" if button.text() == "px" else "px"))
+    cx_row.addWidget(cx_unit_toggle)
+    controls_layout.addLayout(cx_row)
+
+    cy_row = QHBoxLayout()
+    cy_row.setContentsMargins(0, 0, 0, 0)
+    cy_row.setSpacing(4)
+    cy_row.addWidget(QLabel("cy"))
+    cy_input = StepLineEdit(format_position_value(layer, axis="y"))
+    cy_row.addWidget(cy_input, 1)
+    cy_unit_toggle = QPushButton(str(layer.get("center_y_unit", "%")))
+    cy_unit_toggle.setFixedWidth(40)
+    cy_unit_toggle.clicked.connect(lambda _checked=False, item=layer, button=cy_unit_toggle: on_center_unit_changed(item, "y", "%" if button.text() == "px" else "px"))
+    cy_row.addWidget(cy_unit_toggle)
+    controls_layout.addLayout(cy_row)
+
     cx_input.editingFinished.connect(lambda item=layer, x_widget=cx_input, y_widget=cy_input: on_center_changed(item, x_widget, y_widget))
     cy_input.editingFinished.connect(lambda item=layer, x_widget=cx_input, y_widget=cy_input: on_center_changed(item, x_widget, y_widget))
     cx_input.stepRequested.connect(lambda delta, item=layer, x_widget=cx_input, y_widget=cy_input: on_center_step_requested(item, x_widget, y_widget, "x", delta))
     cy_input.stepRequested.connect(lambda delta, item=layer, x_widget=cx_input, y_widget=cy_input: on_center_step_requested(item, x_widget, y_widget, "y", delta))
-    controls_layout.addLayout(center_row)
 
     layout.addWidget(controls)
 
-    table = _build_stop_table(layer, lambda owner, position: format_position_value(owner, position, axis="radius"), on_cell_clicked, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped, column_widths, on_column_resized)
-    populate_linear_stop_table(table, layer, lambda owner, position: format_position_value(owner, position, axis="radius"))
+    table = _build_stop_table(
+        layer,
+        format_position_value,
+        on_cell_clicked,
+        on_item_changed,
+        on_context_requested,
+        on_step_requested,
+        on_reorder_requested,
+        on_add_requested,
+        on_color_dropped,
+        column_widths,
+        on_column_resized,
+    )
+    populate_linear_stop_table(table, layer, format_position_value)
     layout.addWidget(table, 1)
     layer["_stop_table"] = table
     layer["_radial_cx_input"] = cx_input
     layer["_radial_cy_input"] = cy_input
+    layer["_radial_shape_select"] = shape_select
+    layer["_radial_cx_unit_toggle"] = cx_unit_toggle
+    layer["_radial_cy_unit_toggle"] = cy_unit_toggle
     return panel
 
 
-def _build_stop_table(layer: dict, format_stop_value, on_cell_clicked, on_item_changed, on_context_requested, on_step_requested, on_reorder_requested, on_add_requested, on_color_dropped, column_widths, on_column_resized) -> StopTableWidget:
-    table = StopTableWidget(0, 3)
+def _build_stop_table(
+    layer: dict,
+    format_stop_value,
+    on_cell_clicked,
+    on_item_changed,
+    on_context_requested,
+    on_step_requested,
+    on_reorder_requested,
+    on_add_requested,
+    on_color_dropped,
+    column_widths,
+    on_column_resized,
+) -> StopTableWidget:
+    table = StopTableWidget(0, 4)
     table.setItemDelegate(StopTableItemDelegate(table))
-    table.setHorizontalHeaderLabels(["color", "alpha", "stop"])
+    table.setHorizontalHeaderLabels(["color", "alpha", "stop", "unit"])
     table.verticalHeader().setVisible(False)
-    table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
-    table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
-    table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Interactive)
+    for section in range(4):
+        table.horizontalHeader().setSectionResizeMode(section, QHeaderView.Interactive)
     table.horizontalHeader().setMinimumSectionSize(36)
-    for index, width in enumerate(column_widths):
+    for index, width in enumerate(column_widths[:4]):
         table.setColumnWidth(index, width)
     table.setSelectionMode(QAbstractItemView.NoSelection)
     table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
@@ -378,15 +491,17 @@ def populate_linear_stop_table(table: QTableWidget, layer: dict, format_stop_val
         color_text, alpha_text = split_color_and_alpha(str(stop.get("color", "")))
         color_item = QTableWidgetItem(color_text)
         alpha_item = QTableWidgetItem(alpha_text)
-        value_item = QTableWidgetItem(format_stop_value(layer, float(stop.get("position", 0.0))))
+        value_item = QTableWidgetItem(format_stop_value(layer, stop))
+        unit_item = QTableWidgetItem(str(stop.get("unit", "%")))
         color_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
         alpha_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
         value_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        unit_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
         muted = bool(stop.get("muted", False))
         if muted:
             muted_bg = QBrush(QColor("#343841"))
             muted_fg = QBrush(QColor("#8a93a5"))
-            for item in (color_item, alpha_item, value_item):
+            for item in (color_item, alpha_item, value_item, unit_item):
                 item.setBackground(muted_bg)
                 item.setForeground(muted_fg)
         else:
@@ -396,11 +511,12 @@ def populate_linear_stop_table(table: QTableWidget, layer: dict, format_stop_val
         table.setItem(row, 0, color_item)
         table.setItem(row, 1, alpha_item)
         table.setItem(row, 2, value_item)
+        table.setItem(row, 3, unit_item)
     add_row = len(stops)
     add_item = QTableWidgetItem("追加")
     add_item.setFlags((add_item.flags() & ~Qt.ItemIsEditable) & ~Qt.ItemIsSelectable)
     add_item.setTextAlignment(Qt.AlignCenter)
-    table.setSpan(add_row, 0, 1, 3)
+    table.setSpan(add_row, 0, 1, 4)
     table.setItem(add_row, 0, add_item)
     table.setRowHeight(add_row, 24)
     table.blockSignals(False)

@@ -49,14 +49,10 @@ class GradientToolbar(QWidget):
         self.size_w.setFixedWidth(46)
         self.size_w.setFixedHeight(self._button_height)
         size_layout.addWidget(self.size_w)
-        self.unit_px = QPushButton("px")
-        self.unit_percent = QPushButton("%")
-        for button in (self.unit_px, self.unit_percent):
-            button.setCheckable(True)
-            button.setFixedHeight(self._button_height)
-            button.setStyleSheet("padding: 0px 6px;")
-            size_layout.addWidget(button)
-        self.unit_percent.setChecked(True)
+        self.unit_toggle = QPushButton("%")
+        self.unit_toggle.setFixedHeight(self._button_height)
+        self.unit_toggle.setStyleSheet("padding: 0px 6px;")
+        size_layout.addWidget(self.unit_toggle)
 
         guide_box = QWidget()
         guide_box.setObjectName("guide_box")
@@ -97,13 +93,10 @@ class GradientToolbar(QWidget):
         self.grid_input.valueChanged.connect(lambda *_: self.changed.emit())
         self.grid_check.toggled.connect(lambda *_: self.changed.emit())
         self.guide_check.toggled.connect(lambda *_: self.changed.emit())
-        self.unit_px.clicked.connect(self._on_unit_changed)
-        self.unit_percent.clicked.connect(self._on_unit_changed)
+        self.unit_toggle.clicked.connect(self._on_unit_changed)
 
     def _on_unit_changed(self):
-        sender = self.sender()
-        self.unit_px.setChecked(sender is self.unit_px)
-        self.unit_percent.setChecked(sender is self.unit_percent)
+        self.unit_toggle.setText("px" if self.unit_toggle.text() == "%" else "%")
         self.changed.emit()
 
     def get_size(self) -> tuple[float, float, str]:
@@ -116,4 +109,7 @@ class GradientToolbar(QWidget):
         return self.guide_check.isChecked()
 
     def unit_name(self) -> str:
-        return "px" if self.unit_px.isChecked() else "%"
+        return self.unit_toggle.text()
+
+    def set_unit_name(self, unit: str):
+        self.unit_toggle.setText("px" if unit == "px" else "%")
