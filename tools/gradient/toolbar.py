@@ -105,6 +105,10 @@ class GradientToolbar(QWidget):
     def get_grid(self) -> tuple[bool, int]:
         return self.grid_check.isChecked(), self.grid_input.value()
 
+    def set_grid(self, enabled: bool, value: int):
+        self.grid_check.setChecked(bool(enabled))
+        self.grid_input.setValue(max(1, int(value)))
+
     def guide_enabled(self) -> bool:
         return self.guide_check.isChecked()
 

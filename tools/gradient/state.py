@@ -15,6 +15,8 @@ class StopState(TypedDict):
 class LayerState(TypedDict):
     kind: str
     name: str
+    grid_enabled: bool
+    grid_value: int
     deg: int
     deg_mode: str
     center_x: float
@@ -41,6 +43,8 @@ def serialize_layer(layer: dict) -> LayerState:
     return {
         "kind": kind,
         "name": str(layer.get("name", default_name)),
+        "grid_enabled": bool(layer.get("grid_enabled", True)),
+        "grid_value": max(1, int(layer.get("grid_value", 10))),
         "deg": int(layer.get("deg", 90)),
         "deg_mode": str(layer.get("deg_mode", "input")),
         "center_x": float(layer.get("center_x", 0.5)),
@@ -67,7 +71,13 @@ def serialize_layers(layers: list[dict]) -> list[LayerState]:
     return [serialize_layer(layer) for layer in layers]
 
 
-def normalize_layer_payload(item: dict, default_name_factory: Callable[[str], str], default_linear_stop_unit: str = "%") -> LayerState | None:
+def normalize_layer_payload(
+    item: dict,
+    default_name_factory: Callable[[str], str],
+    default_linear_stop_unit: str = "%",
+    default_grid_enabled: bool = True,
+    default_grid_value: int = 10,
+) -> LayerState | None:
     if not isinstance(item, dict):
         return None
     kind = str(item.get("kind", "linear"))
@@ -77,6 +87,8 @@ def normalize_layer_payload(item: dict, default_name_factory: Callable[[str], st
     return {
         "kind": kind,
         "name": str(item.get("name", default_name)),
+        "grid_enabled": bool(item.get("grid_enabled", default_grid_enabled)),
+        "grid_value": max(1, int(item.get("grid_value", default_grid_value))),
         "deg": int(item.get("deg", 90)),
         "deg_mode": str(item.get("deg_mode", "input")),
         "center_x": float(item.get("center_x", 0.5)),

@@ -3,6 +3,7 @@ from .markdown.tool import Tab as Memo
 from .clip_path.tool import Tab as ClipPath
 from .clipboard.tool import Tab as ClipBoard
 from .gradient.tool import Tab as Gradient
+from .progress.tool import Tab as Progress
 
 TOOLS = [
     Clamp,
@@ -10,4 +11,5 @@ TOOLS = [
     ClipPath,
     ClipBoard,
     Gradient,
+    Progress,
 ]

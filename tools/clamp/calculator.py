@@ -1,21 +1,24 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Qt,QEvent
-from PySide6.QtGui import QKeySequence, QShortcut,QFontMetrics
+import re
+
+from PySide6.QtCore import QEvent, QTimer, Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
-    QFormLayout,
+    QComboBox,
     QFrame,
+    QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
-    QSizePolicy,
-    QLabel
 )
 
-from .logic import build_clamp
+from .logic import build_clamp, parse_value_text
 
 
 class ClampCalculator(QWidget):
@@ -24,7 +27,7 @@ class ClampCalculator(QWidget):
         self.tool = tool
         self.last_edited = None
         self._current_result_text = "clamp(...)"
-        self._result_unit = "px"
+        self._result_unit = ""
         self._result_values = None
 
         self.setup_ui()
@@ -34,7 +37,6 @@ class ClampCalculator(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout()
 
-        # free input block
         self.free_box = QFrame()
         self.free_box.setProperty("state", "normal")
         free_layout = QVBoxLayout(self.free_box)
@@ -46,7 +48,6 @@ class ClampCalculator(QWidget):
         free_layout.addWidget(self.free_input)
         layout.addWidget(self.free_box)
 
-        # form block
         self.form_box = QFrame()
         self.form_box.setProperty("state", "normal")
         form_layout = QFormLayout(self.form_box)
@@ -57,13 +58,12 @@ class ClampCalculator(QWidget):
         self.min_view = QLineEdit()
         self.max_view = QLineEdit()
 
-        form_layout.addRow("min px", self.min_px)
+        form_layout.addRow("min value", self.min_px)
         form_layout.addRow("min view", self.min_view)
         form_layout.addRow("max view", self.max_view)
-        form_layout.addRow("max px", self.max_px)
+        form_layout.addRow("max value", self.max_px)
         layout.addWidget(self.form_box)
 
-        # action buttons
         button_row = QHBoxLayout()
         self.calc_button = QPushButton("calculate")
         self.reset_button = QPushButton("reset")
@@ -72,10 +72,8 @@ class ClampCalculator(QWidget):
         button_row.addWidget(self.reset_button)
         layout.addLayout(button_row)
 
-        # 余白はここ
         layout.addStretch()
-        
-        # result button
+
         result_row = QHBoxLayout()
         result_row.setContentsMargins(0, 0, 0, 0)
         result_row.setSpacing(8)
@@ -85,22 +83,37 @@ class ClampCalculator(QWidget):
         self.result_label.setProperty("state", "start")
         self.result_label.setCursor(Qt.PointingHandCursor)
 
-        self.unit_toggle = QPushButton("px")
-        self.unit_toggle.setObjectName("unitToggle")
-        self.unit_toggle.setCheckable(True)
+        self.unit_selector_frame = QFrame()
+        self.unit_selector_frame.setObjectName("unitSelectorFrame")
+        self.unit_selector_frame.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        selector_layout = QHBoxLayout(self.unit_selector_frame)
+        selector_layout.setContentsMargins(0, 0, 0, 0)
+        selector_layout.setSpacing(0)
+
+        self.unit_toggle = QComboBox()
+        self.unit_toggle.setObjectName("unitSelector")
         self.unit_toggle.setCursor(Qt.PointingHandCursor)
         self.unit_toggle.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.unit_toggle.setFixedWidth(28)
+        self.unit_toggle.setMinimumWidth(44)
+        self.unit_toggle.addItem("", "")
+        self.unit_toggle.addItem("px", "px")
+        self.unit_toggle.addItem("%", "%")
+        self.unit_toggle.addItem("rem", "rem")
+
+        self.unit_arrow = QLabel("")
+        self.unit_arrow.setObjectName("unitSelectorArrow")
+        self.unit_arrow.setAlignment(Qt.AlignCenter)
+        self.unit_arrow.setFixedWidth(6)
+
+        selector_layout.addWidget(self.unit_toggle)
+        selector_layout.addWidget(self.unit_arrow)
 
         result_row.addWidget(self.result_label, 1)
-        result_row.addWidget(self.unit_toggle, 0, Qt.AlignTop)
-
+        result_row.addWidget(self.unit_selector_frame, 0, Qt.AlignTop)
         layout.addLayout(result_row)
 
-        ## 余白はここ
         layout.addStretch()
 
-        # reverse block
         self.reverse_box = QFrame()
         self.reverse_box.setProperty("state", "normal")
         reverse_layout = QVBoxLayout(self.reverse_box)
@@ -113,7 +126,6 @@ class ClampCalculator(QWidget):
         layout.addWidget(self.reverse_box)
 
         self.setLayout(layout)
-
         self.setStyleSheet(
             """
             QFrame {
@@ -125,13 +137,43 @@ class ClampCalculator(QWidget):
                 border: 1px solid #4ecdc4;
                 background: rgba(78, 205, 196, 0.12);
             }
-            QPushButton#unitToggle,
-            QPushButton#unitToggle:hover,
-            QPushButton#unitToggle:pressed,
-            QPushButton#unitToggle:checked,
-            QPushButton#unitToggle:checked:hover,
-            QPushButton#unitToggle:checked:pressed {
+            QFrame#unitSelectorFrame {
                 background-color: #333333;
+                color: #dddddd;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                min-height: 22px;
+            }
+            QFrame#unitSelectorFrame:hover {
+                background-color: #444444;
+            }
+            QComboBox#unitSelector {
+                background: transparent;
+                color: #dddddd;
+                border: none;
+                padding: 2px 4px 2px 8px;
+                min-height: 22px;
+            }
+            QComboBox#unitSelector::drop-down {
+                width: 0px;
+                border: none;
+                background: transparent;
+            }
+            QComboBox#unitSelector::down-arrow {
+                image: none;
+            }
+            QComboBox#unitSelector QAbstractItemView {
+                background-color: #333333;
+                color: #dddddd;
+                border: 1px solid #555555;
+                selection-background-color: #444444;
+                selection-color: #ffffff;
+            }
+            QLabel#unitSelectorArrow {
+                color: #dddddd;
+                background: transparent;
+                border: none;
+                padding-right: 0px;
             }
             QLabel[state="error"] { color: #ff6b6b; }
             QLabel[state="copied"] { color: #4ecdc4; }
@@ -142,13 +184,13 @@ class ClampCalculator(QWidget):
         self.calc_button.clicked.connect(self.calc_exe)
         self.reset_button.clicked.connect(self.reset_all)
         self.result_label.mousePressEvent = lambda e: self.copy_result()
-        self.unit_toggle.clicked.connect(self.toggle_result_unit)
+        self.unit_toggle.currentIndexChanged.connect(self.toggle_result_unit)
 
         self.free_input.installEventFilter(self)
-        for w in (self.min_px, self.max_px, self.min_view, self.max_view):
-            w.installEventFilter(self)
+        for widget in (self.min_px, self.max_px, self.min_view, self.max_view):
+            widget.installEventFilter(self)
         self.reverse_input.installEventFilter(self)
-        
+
     def eventFilter(self, obj, event):
         if event.type() == QEvent.FocusIn:
             if obj == self.free_input:
@@ -210,31 +252,31 @@ class ClampCalculator(QWidget):
             self.error_result("textが入力されてません")
             return
 
-        normalized = (
-            text.replace(",", " ")
-            .replace("px", "")
-            .replace("~", " ")
-            .replace("〜", " ")
-            .replace("　", " ")
-        )
+        normalized = text.replace(",", " ").replace("~", " ").replace("～", " ").replace("　", " ")
         parts = normalized.split()
         if len(parts) != 4:
             self.error_result("textの形式が正しくありません（例: 16 350 767 32）")
             return
 
-        min_px, min_view, max_view, max_px = parts
-        self.min_px.setText(min_px)
-        self.max_px.setText(max_px)
+        min_value, min_view, max_view, max_value = parts
+        self.min_px.setText(min_value)
+        self.max_px.setText(max_value)
         self.min_view.setText(min_view)
         self.max_view.setText(max_view)
-
         self.form_exe()
 
     def form_exe(self):
         self.flash_box(self.form_box)
+        ok, min_value = parse_value_text(self.min_px.text())
+        if not ok:
+            self.error_result(min_value)
+            return
+        ok, max_value = parse_value_text(self.max_px.text())
+        if not ok:
+            self.error_result(max_value)
+            return
+
         try:
-            min_px = float(self.min_px.text())
-            max_px = float(self.max_px.text())
             min_view = float(self.min_view.text())
             max_view = float(self.max_view.text())
         except ValueError:
@@ -242,168 +284,102 @@ class ClampCalculator(QWidget):
             return
 
         ok, payload = build_clamp(
-            min_px,
-            max_px,
+            min_value,
+            max_value,
             min_view,
             max_view,
-            unit=self._result_unit,
+            selected_unit=self._result_unit,
         )
         if not ok:
             self.error_result(payload)
             return
 
-        self.success_result(min_px, min_view, max_view, max_px)
+        self.success_result(self.min_px.text().strip(), min_view, max_view, self.max_px.text().strip(), payload)
 
     def reverse_exe(self):
         self.flash_box(self.reverse_box)
-        original_text = self.reverse_input.text().strip()
-        text = "".join(original_text.lower().split())
-        
+        text = self.reverse_input.text().strip()
         if not text.startswith("clamp(") or not text.endswith(")"):
             self.error_result("error")
             return
 
         try:
             inner = text[6:-1]
-            min_px_raw, calc_part, max_px_raw = inner.split(",")
-            min_px, clamp_unit = self._parse_value_with_unit(min_px_raw)
-            max_px, max_unit = self._parse_value_with_unit(max_px_raw)
-            if max_unit != clamp_unit:
+            min_raw, calc_raw, max_raw = [part.strip() for part in inner.split(",", 2)]
+            min_value, clamp_unit = self._parse_value_with_unit(min_raw)
+            max_value, max_unit = self._parse_value_with_unit(max_raw)
+            if clamp_unit != max_unit:
                 raise ValueError("mixed units")
 
-            calc_inner = calc_part.replace("calc(", "").replace(")", "")
-            if "+" in calc_inner:
-                left, right = calc_inner.split("+", 1)
-                sign = 1
-            elif "-" in calc_inner:
-                left, right = calc_inner.split("-", 1)
-                sign = -1
-            else:
-                raise ValueError("missing +/- in calc")
+            calc_match = re.fullmatch(
+                r"calc\(\s*(-?(?:\d+|\d*\.\d+))\s*([a-zA-Z%]*)\s*([+-])\s*(-?(?:\d+|\d*\.\d+))vw\s*\)",
+                calc_raw,
+            )
+            if not calc_match:
+                raise ValueError("invalid calc")
 
-            if left.endswith("px") or left.endswith("%"):
-                px_part, vw_part = left, right
-            else:
-                px_part, vw_part = right, left
-
-            base_px, base_unit = self._parse_value_with_unit(px_part)
-            if base_unit != clamp_unit:
+            intercept = float(calc_match.group(1))
+            intercept_unit = calc_match.group(2)
+            sign = -1 if calc_match.group(3) == "-" else 1
+            slope = float(calc_match.group(4)) * sign
+            if intercept_unit != clamp_unit:
                 raise ValueError("mixed units")
-            vw = float(vw_part.replace("vw", "")) * sign
-
-            if vw == 0:
+            if slope == 0:
                 raise ValueError("vw cannot be zero")
 
-            # 👇 まずfloatで算出
-            min_view_f = (min_px - base_px) / vw * 100
-            max_view_f = (max_px - base_px) / vw * 100
-
-            # 👇 clamp再計算用（ローカル関数）
-            def calc_clamp(min_px, min_view, max_view, max_px):
-                slope = (max_px - min_px) / (max_view - min_view) * 100
-                base = min_px - slope * (min_view / 100)
-                return base, slope
-
-            # 👇 周辺探索（ここが本体）
-            candidates = []
-
-            for dv_min in range(-2, 3):
-                for dv_max in range(-2, 3):
-                    test_min_view = int(round(min_view_f)) + dv_min
-                    test_max_view = int(round(max_view_f)) + dv_max
-
-                    if test_min_view >= test_max_view:
-                        continue
-
-                    base, slope = calc_clamp(min_px, test_min_view, test_max_view, max_px)
-
-                    # clamp再現
-                    re_base, re_slope = base, slope
-
-                    # 誤差初期化（←これ大事）
-                    error = (
-                        abs(base_px - re_base) * 50 +
-                        abs(vw - re_slope) * 50
-                    )
-
-                    # min側チェック
-                    calc_min = re_base + re_slope * (test_min_view / 100)
-                    # max側チェック
-                    calc_max = re_base + re_slope * (test_max_view / 100)
-
-                    error += abs(calc_min - min_px) * 100
-                    error += abs(calc_max - max_px) * 100
-
-                    candidates.append((error, test_min_view, test_max_view))
-
-            if not candidates:
-                raise ValueError("no candidates")
-
-            _, min_view, max_view = min(candidates, key=lambda x: x[0])
-
-            pairs = sorted([(min_view, min_px), (max_view, max_px)])
-            (min_view, min_px), (max_view, max_px) = pairs
+            min_view = (min_value - intercept) / slope * 100
+            max_view = (max_value - intercept) / slope * 100
+            pairs = sorted([(min_view, min_value), (max_view, max_value)], key=lambda pair: pair[0])
+            (min_view, min_value), (max_view, max_value) = pairs
 
         except (ValueError, ZeroDivisionError):
             self.error_result("error")
             return
 
-        self.min_px.setText(f"{min_px:g}")
-        self.max_px.setText(f"{max_px:g}")
-        self.min_view.setText(str(min_view))
-        self.max_view.setText(str(max_view))
+        self.min_px.setText(self._format_value_with_unit(min_value, clamp_unit))
+        self.max_px.setText(self._format_value_with_unit(max_value, clamp_unit))
+        self.min_view.setText(self._format_number(min_view))
+        self.max_view.setText(self._format_number(max_view))
         self.set_result_unit(clamp_unit, save_state=False)
-        self.success_result(min_px, min_view, max_view, max_px)
+        self.success_result(self.min_px.text().strip(), min_view, max_view, self.max_px.text().strip(), text)
 
     def run_from_history(self, entry):
-        self.min_px.setText(f"{float(entry.get('min_px', 0)):g}")
-        self.min_view.setText(f"{int(entry.get('min_view', 0))}")
-        self.max_view.setText(f"{int(entry.get('max_view', 0))}")
-        self.max_px.setText(f"{float(entry.get('max_px', 0)):g}")
+        self.min_px.setText(str(entry.get("min_px", "")))
+        self.min_view.setText(str(entry.get("min_view", "")))
+        self.max_view.setText(str(entry.get("max_view", "")))
+        self.max_px.setText(str(entry.get("max_px", "")))
         self.set_last("form")
         self.min_px.setFocus()
         if hasattr(self.tool, "_save_state"):
             self.tool._save_state()
 
-    def success_result(
-        self,
-        min_px=None,
-        min_view=None,
-        max_view=None,
-        max_px=None,
-    ):
-        clamp = self._build_result_text(min_px, min_view, max_view, max_px)
+    def success_result(self, min_px=None, min_view=None, max_view=None, max_px=None, clamp_text=None):
+        clamp = clamp_text or self._build_result_text(min_px, min_view, max_view, max_px)
         if clamp is None:
             self.error_result("error")
             return
 
-        min_px = f"{min_px:g}"
-        min_view = f"{min_view:g}"
-        max_view = f"{max_view:g}"
-        max_px = f"{max_px:g}"
         self._result_values = (
-            float(min_px),
-            float(max_px),
+            str(min_px),
+            str(max_px),
             float(min_view),
             float(max_view),
         )
         self._current_result_text = clamp
         self.result_label.setText(clamp)
-
         self.result_label.setProperty("state", "success")
         self.result_label.style().unpolish(self.result_label)
         self.result_label.style().polish(self.result_label)
 
         self.copy_result()
 
-        # history送信
         if None not in (min_px, min_view, max_view, max_px):
             self.tool.history.add_history(
                 clamp,
-                min_px,
-                min_view,
-                max_view,
-                max_px,
+                str(min_px),
+                self._format_number(float(min_view)),
+                self._format_number(float(max_view)),
+                str(max_px),
             )
 
     def error_result(self, message: str):
@@ -419,12 +395,10 @@ class ClampCalculator(QWidget):
             return
 
         QApplication.clipboard().setText(self._current_result_text)
-
         self.result_label.setProperty("state", "copied")
         self.result_label.setText("Copied!")
         self.result_label.style().unpolish(self.result_label)
         self.result_label.style().polish(self.result_label)
-
         QTimer.singleShot(600, self.restore_result)
 
     def restore_result(self):
@@ -440,7 +414,6 @@ class ClampCalculator(QWidget):
         self.min_view.clear()
         self.max_view.clear()
         self.reverse_input.clear()
-
         self._result_values = None
         self._current_result_text = "clamp(...)"
         self.result_label.setText(self._current_result_text)
@@ -457,14 +430,13 @@ class ClampCalculator(QWidget):
             self.tool._save_state()
 
     def toggle_result_unit(self):
-        unit = "%" if self.unit_toggle.isChecked() else "px"
-        self.set_result_unit(unit)
+        self.set_result_unit(self.unit_toggle.currentData())
 
     def set_result_unit(self, unit: str, save_state: bool = True):
-        self._result_unit = "%" if unit == "%" else "px"
+        self._result_unit = unit if unit in {"", "px", "%", "rem"} else ""
         self.unit_toggle.blockSignals(True)
-        self.unit_toggle.setChecked(self._result_unit == "%")
-        self.unit_toggle.setText(self._result_unit)
+        index = self.unit_toggle.findData(self._result_unit)
+        self.unit_toggle.setCurrentIndex(max(0, index))
         self.unit_toggle.blockSignals(False)
 
         if self._result_values and self.result_label.property("state") in {"success", "copied"}:
@@ -479,19 +451,35 @@ class ClampCalculator(QWidget):
             self.tool._save_state()
 
     def _build_result_text(self, min_px, min_view, max_view, max_px):
+        ok, min_value = parse_value_text(str(min_px))
+        if not ok:
+            return None
+        ok, max_value = parse_value_text(str(max_px))
+        if not ok:
+            return None
         ok, payload = build_clamp(
-            float(min_px),
-            float(max_px),
+            min_value,
+            max_value,
             float(min_view),
             float(max_view),
-            unit=self._result_unit,
+            selected_unit=self._result_unit,
         )
         return payload if ok else None
 
     def _parse_value_with_unit(self, text: str) -> tuple[float, str]:
-        value_text = text.strip()
-        if value_text.endswith("px"):
-            return float(value_text[:-2]), "px"
-        if value_text.endswith("%"):
-            return float(value_text[:-1]), "%"
-        raise ValueError("missing unit")
+        ok, payload = parse_value_text(text)
+        if not ok:
+            raise ValueError("invalid value")
+        return payload
+
+    def _format_value_with_unit(self, value: float, unit: str) -> str:
+        return f"{self._format_number(value)}{unit}"
+
+    def _format_number(self, value: float) -> str:
+        rounded = round(value)
+        if abs(value - rounded) < 1e-9:
+            return str(int(rounded))
+        rounded_2 = round(value, 2)
+        if abs(rounded_2 - round(rounded_2)) < 1e-9:
+            return str(int(round(rounded_2)))
+        return f"{rounded_2:.2f}".rstrip("0").rstrip(".")

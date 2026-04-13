@@ -139,6 +139,27 @@ class GradientCanvas(QWidget):
         step = grid_value / 100.0
         return max(step, 1e-6), max(step, 1e-6)
 
+    def _linear_grid_step(self, layer: dict) -> float:
+        active, grid_value = self.config.grid_getter()
+        if not active:
+            return 0.0
+        size_w, size_h, unit = self.config.size_getter()
+        deg = self._layer_deg(layer)
+        if unit == "px":
+            direction = self._gradient_direction(deg)
+            span = abs(direction.x()) * size_w + abs(direction.y()) * size_h
+            return grid_value / max(span, 1e-6)
+        return grid_value / 100.0
+
+    def _radial_grid_step(self, layer: dict) -> float:
+        active, grid_value = self.config.grid_getter()
+        if not active:
+            return 0.0
+        unit = self._default_stop_unit(layer)
+        if unit == "px":
+            return grid_value / max(self._logical_radial_span(layer), 1e-6)
+        return grid_value / 100.0
+
     def _gradient_direction(self, deg: float) -> QPointF:
         rad = math.radians(deg)
         return QPointF(math.sin(rad), -math.cos(rad))
@@ -880,35 +901,58 @@ class GradientCanvas(QWidget):
                 self._guide_content_cache = cached
         painter.restore()
 
-        active, grid_value = self.config.grid_getter()
-        if active:
-            painter.setPen(QPen(QColor("#3a4255"), 1))
-            step_nx, step_ny = self._grid_steps_normalized(max(1, grid_value))
-            step_x = guide_scene.width() * step_nx
-            step_y = guide_scene.height() * step_ny
-            screen_rect = self.rect()
-            scene_top_left = self._screen_to_scene(screen_rect.topLeft())
-            scene_bottom_right = self._screen_to_scene(screen_rect.bottomRight())
-            x_start_idx = int((scene_top_left.x() - guide_scene.x()) // step_x) - 1
-            x_end_idx = int((scene_bottom_right.x() - guide_scene.x()) // step_x) + 1
-            y_start_idx = int((scene_top_left.y() - guide_scene.y()) // step_y) - 1
-            y_end_idx = int((scene_bottom_right.y() - guide_scene.y()) // step_y) + 1
-            for idx in range(x_start_idx, x_end_idx + 1):
-                x = guide_scene.x() + step_x * idx
-                sx = self._scene_to_screen(QPointF(x, 0)).x()
-                painter.drawLine(QPointF(sx, float(screen_rect.top())), QPointF(sx, float(screen_rect.bottom())))
-            for idx in range(y_start_idx, y_end_idx + 1):
-                y = guide_scene.y() + step_y * idx
-                sy = self._scene_to_screen(QPointF(0, y)).y()
-                painter.drawLine(QPointF(float(screen_rect.left()), sy), QPointF(float(screen_rect.right()), sy))
-
         guide_enabled = self.config.guide_enabled_getter()
+        active_layer = self.config.active_layer_getter()
+        active_grid_enabled, _grid_value = self.config.grid_getter()
+        if active_grid_enabled and active_layer and not active_layer.get("muted", False):
+            painter.setPen(QPen(QColor("#3a4255"), 1))
+            if active_layer.get("kind") == "linear":
+                deg = self._layer_deg(active_layer)
+                step = self._linear_grid_step(active_layer)
+                if step > 1e-6:
+                    direction = self._gradient_direction(deg)
+                    normal = QPointF(-direction.y(), direction.x())
+                    line_span = self._guide_diagonal() * 2.0
+                    visible_scene = QRectF(self._screen_to_scene(self.rect().topLeft()), self._screen_to_scene(self.rect().bottomRight())).normalized()
+                    min_pos, max_pos = self._position_range_for_scene_rect(visible_scene, deg)
+                    start_index = math.floor(min_pos / step) - 1
+                    end_index = math.ceil(max_pos / step) + 1
+                    for idx in range(start_index, end_index + 1):
+                        position = idx * step
+                        anchor = self._position_to_scene(position, deg)
+                        start = self._scene_to_screen(QPointF(anchor.x() - normal.x() * line_span, anchor.y() - normal.y() * line_span))
+                        end = self._scene_to_screen(QPointF(anchor.x() + normal.x() * line_span, anchor.y() + normal.y() * line_span))
+                        painter.drawLine(start, end)
+            elif active_layer.get("kind") == "radial":
+                step = self._radial_grid_step(active_layer)
+                if step > 1e-6:
+                    center_screen = self._scene_to_screen(self._radial_center_scene(active_layer))
+                    max_radius = 0.0
+                    for corner in (self.rect().topLeft(), self.rect().topRight(), self.rect().bottomLeft(), self.rect().bottomRight()):
+                        corner_point = QPointF(float(corner.x()), float(corner.y()))
+                        max_radius = max(max_radius, math.hypot(corner_point.x() - center_screen.x(), corner_point.y() - center_screen.y()) / max(self.zoom, 1e-6))
+                    if str(active_layer.get("shape", "circle")) == "ellipse":
+                        guide_rect = self._guide_rect_scene()
+                        center_scene = self._radial_center_scene(active_layer)
+                        max_radius_x = max(center_scene.x() - guide_rect.left(), guide_rect.right() - center_scene.x())
+                        max_radius_y = max(center_scene.y() - guide_rect.top(), guide_rect.bottom() - center_scene.y())
+                        count = max(1, int(math.ceil(max_radius / step)))
+                        for idx in range(1, count + 1):
+                            radius = idx * step
+                            rx = max_radius_x * radius * self.zoom
+                            ry = max_radius_y * radius * self.zoom
+                            painter.drawEllipse(center_screen, rx, ry)
+                    else:
+                        count = max(1, int(math.ceil(max_radius / step)))
+                        for idx in range(1, count + 1):
+                            radius = idx * step * self._radial_span(active_layer) * self.zoom
+                            painter.drawEllipse(center_screen, radius, radius)
+
         if guide_enabled:
             for inset, color in ((0.5, "#f8fafc"), (1.5, "#111827"), (2.5, "#f8fafc")):
                 painter.setPen(QPen(QColor(color), 1))
                 painter.drawRect(guide_screen.adjusted(inset, inset, -inset, -inset))
 
-        active_layer = self.config.active_layer_getter()
         if guide_enabled and active_layer and active_layer.get("kind") == "linear":
             deg = self._layer_deg(active_layer)
             direction = self._gradient_direction(deg)

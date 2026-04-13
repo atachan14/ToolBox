@@ -54,7 +54,7 @@ class Tab(ToolBase):
         self.calculator.max_view.setText(state.get("max_view", ""))
         self.calculator.max_px.setText(state.get("max_px", ""))
         self.calculator.reverse_input.setText(state.get("reverse_input", ""))
-        self.calculator.set_result_unit(state.get("result_unit", "px"), save_state=False)
+        self.calculator.set_result_unit(state.get("result_unit", ""), save_state=False)
         self.calculator.last_edited = state.get("last_edited")
         self.tabs.setCurrentIndex(state.get("active_tab", 0))
 

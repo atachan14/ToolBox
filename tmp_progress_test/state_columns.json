@@ -1,0 +1,21 @@
+{
+  "segments": [
+    {
+      "progress_name": "",
+      "start_p": "",
+      "end_p": "",
+      "start_v": "",
+      "end_v": ""
+    }
+  ],
+  "history_dialog_width": 620,
+  "history_dialog_height": 360,
+  "segment_table_column_widths": [
+    36,
+    222,
+    72,
+    72,
+    120,
+    120
+  ]
+}

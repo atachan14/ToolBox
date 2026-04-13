@@ -57,6 +57,7 @@ class GradientWindow(QMainWindow):
         self.selected_palette_color = self.PALETTE_COLORS[0]
         self._hover_position: float | None = None
         self._building_tabs = False
+        self._syncing_toolbar = False
         self._table_syncing = False
         self._code_full_text = "background: none;"
         self._code_scroll_offset = 0
@@ -207,7 +208,10 @@ class GradientWindow(QMainWindow):
         return self.toolbar.get_size()
 
     def _get_grid(self) -> tuple[bool, int]:
-        return self.toolbar.get_grid()
+        layer = self._active_layer()
+        if layer is None:
+            return self.toolbar.get_grid()
+        return bool(layer.get("grid_enabled", True)), max(1, int(layer.get("grid_value", 10)))
 
     def _guide_enabled(self) -> bool:
         return self.toolbar.guide_enabled()
@@ -431,12 +435,12 @@ class GradientWindow(QMainWindow):
             self.selected_palette_color = self.palette.palette_colors[0]
             self.palette.select_index(0)
 
-    def _apply_layers_state(self, layers_state, active_tab: int = 0):
+    def _apply_layers_state(self, layers_state, active_tab: int = 0, default_grid_enabled: bool = True, default_grid_value: int = 10):
         self.layers = []
         self.inspector_tabs.clear()
         if isinstance(layers_state, list):
             for item in layers_state:
-                normalized = normalize_layer_payload(item, self._layer_default_name, self._unit_name())
+                normalized = normalize_layer_payload(item, self._layer_default_name, self._unit_name(), default_grid_enabled, default_grid_value)
                 if normalized is not None:
                     self._add_layer(normalized["kind"], normalized)
         if not self.layers or self.layers[0].get("kind") != "background":
@@ -531,8 +535,6 @@ class GradientWindow(QMainWindow):
 
         self.toolbar.size_h.setValue(max(1, int(state.get("size_h", 100))))
         self.toolbar.size_w.setValue(max(1, int(state.get("size_w", 100))))
-        self.toolbar.grid_input.setValue(max(1, int(state.get("grid_value", 10))))
-        self.toolbar.grid_check.setChecked(bool(state.get("grid_enabled", True)))
         self.toolbar.guide_check.setChecked(bool(state.get("guide_enabled", True)))
         unit = state.get("unit", "%")
         self.toolbar.set_unit_name(str(unit))
@@ -543,7 +545,12 @@ class GradientWindow(QMainWindow):
             except (TypeError, ValueError):
                 self._stop_table_column_widths = [52, 48, 52, 42]
         self._apply_palette_state(state.get("palette_colors"), state.get("selected_palette_color", self.palette.palette_colors[0]))
-        self._apply_layers_state(layers_state, int(state.get("active_tab", 0)))
+        self._apply_layers_state(
+            layers_state,
+            int(state.get("active_tab", 0)),
+            bool(state.get("grid_enabled", True)),
+            max(1, int(state.get("grid_value", 10))),
+        )
         self._refresh_all()
 
     def _layer_default_name(self, kind: str) -> str:
@@ -563,6 +570,8 @@ class GradientWindow(QMainWindow):
             return {
                 "kind": kind,
                 "name": self._layer_default_name(kind),
+                "grid_enabled": True,
+                "grid_value": 10,
                 "center_x": 50.0,
                 "center_x_unit": "%",
                 "center_y": 50.0,
@@ -572,10 +581,20 @@ class GradientWindow(QMainWindow):
                 "stops": [],
                 "muted": False,
             }
-        return {"kind": kind, "name": self._layer_default_name(kind), "deg": 90, "deg_mode": "input", "repeat": False, "stops": [], "muted": False}
+        return {
+            "kind": kind,
+            "name": self._layer_default_name(kind),
+            "grid_enabled": True,
+            "grid_value": 10,
+            "deg": 90,
+            "deg_mode": "input",
+            "repeat": False,
+            "stops": [],
+            "muted": False,
+        }
 
     def _new_background_layer(self) -> dict:
-        return {"kind": "background", "name": "b", "color": "#00000000", "muted": False}
+        return {"kind": "background", "name": "b", "grid_enabled": True, "grid_value": 10, "color": "#00000000", "muted": False}
 
     def _active_layer(self) -> dict | None:
         index = self.inspector_tabs.currentIndex()
@@ -918,6 +937,16 @@ class GradientWindow(QMainWindow):
             if isinstance(table, QTableWidget):
                 self._populate_stop_table(table, layer)
 
+    def _sync_toolbar_from_active_layer(self):
+        layer = self._active_layer()
+        if layer is None:
+            return
+        self._syncing_toolbar = True
+        try:
+            self.toolbar.set_grid(bool(layer.get("grid_enabled", True)), int(layer.get("grid_value", 10)))
+        finally:
+            self._syncing_toolbar = False
+
     def _refresh_lightweight(self, target_layer: dict | None = None):
         self.palette.select_color(self.selected_palette_color)
         self._update_tab_visuals()
@@ -1011,6 +1040,7 @@ class GradientWindow(QMainWindow):
         self._update_code_label_layout(reset_scroll=True)
 
     def _refresh_all(self):
+        self._sync_toolbar_from_active_layer()
         self.palette.select_color(self.selected_palette_color)
         self._update_tab_visuals()
         for layer in self.layers:
@@ -1040,11 +1070,18 @@ class GradientWindow(QMainWindow):
         self._record_undo_snapshot()
 
     def _on_ui_changed(self, *_):
+        if not self._syncing_toolbar:
+            layer = self._active_layer()
+            if layer is not None:
+                grid_enabled, grid_value = self.toolbar.get_grid()
+                layer["grid_enabled"] = bool(grid_enabled)
+                layer["grid_value"] = max(1, int(grid_value))
         self._refresh_cursor_text()
         self._refresh_all()
 
     def _on_tab_changed(self, *_):
         layer = self._active_layer()
+        self._sync_toolbar_from_active_layer()
         if not layer or layer.get("kind") not in ("linear", "radial"):
             self._selected_stop_index = None
         else:
@@ -1123,7 +1160,12 @@ class GradientWindow(QMainWindow):
         self.toolbar.set_unit_name(str(unit))
 
         self._apply_palette_state(state.get("palette_colors"), state.get("selected_palette_color", self.palette_colors[0]))
-        self._apply_layers_state(state.get("layers", []), int(state.get("active_tab", 0)))
+        self._apply_layers_state(
+            state.get("layers", []),
+            int(state.get("active_tab", 0)),
+            bool(state.get("grid_enabled", True)),
+            max(1, int(state.get("grid_value", 10))),
+        )
 
     def _save_state(self):
         if not self.state_path:

@@ -1,0 +1,20 @@
+{
+  "segments": [
+    {
+      "progress_name": "--mv-progress-top",
+      "start_p": "0.8",
+      "end_p": "1.2",
+      "start_v": "0",
+      "end_v": "200px"
+    },
+    {
+      "progress_name": "--about-progress-top",
+      "start_p": "0.8",
+      "end_p": "1.2",
+      "start_v": "200px",
+      "end_v": "100px"
+    }
+  ],
+  "history_dialog_width": 620,
+  "history_dialog_height": 360
+}
