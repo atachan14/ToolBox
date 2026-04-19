@@ -85,7 +85,20 @@ Development
 
 - Python 3.14
 - PySide6
+- requests
 - pywin32 (Windows only)
+
+## Install
+
+```powershell
+python -m pip install -e .
+```
+
+PyInstaller も含めて開発用に入れる場合:
+
+```powershell
+python -m pip install -e .[dev]
+```
 
 ## Run
 
@@ -106,6 +119,19 @@ python main.py
 - `dist/ToolBox/ToolBox.exe`
 - `dist/ToolBox/updater.exe`
 
+## Portable Design
+
+ToolBox はインストーラ型ではなく、展開してそのまま使うポータブルアプリとして設計しています。
+
+ユーザーデータやツール状態は、`AppData` ではなくアプリフォルダ内の `Users/` に保存します。
+そのため、フォルダごとコピーして持ち運べます。
+また、フォルダごと削除すれば設定や履歴もまとめて削除できます。
+
+注意:
+- `Program Files` 配下のような書き込み制限のある場所での利用は想定していません。
+- 展開先の任意フォルダで使用してください。
+
+
 ## Project Structure
 
 ```text
@@ -121,7 +147,7 @@ python main.py
 
 ## Data Persistence
 
-このアプリはツールごとのデータやタブ状態を保存します。
+このアプリはツールごとのデータやタブ状態を、アプリフォルダ内の `Users/` に保存します。
 
 ```text
 Users/

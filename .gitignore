@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 *.pyo
+*.egg-info/
+.pytest_cache/
+pytest-cache-files-*/
 
 # build
 build/
@@ -10,9 +13,6 @@ dist/
 # env
 venv/
 .env
-
-# pyinstaller
-*.spec
 
 # tabs
 Users/

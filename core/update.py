@@ -3,17 +3,34 @@ import zipfile
 import tempfile
 import subprocess
 import sys
-import os
 from pathlib import Path
 from core.version import VERSION
 
 REPO = "atachan14/ToolBox"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
 
+
+def is_frozen_build():
+    return bool(getattr(sys, "frozen", False))
+
+
+def get_updater_path():
+    if not is_frozen_build():
+        return None
+    return Path(sys.executable).parent / "updater.exe"
+
+
+def can_self_update():
+    updater = get_updater_path()
+    return updater is not None and updater.exists()
+
 def parse_version(v):
     return tuple(map(int, v.split(".")))
 
 def check_update():
+    if not can_self_update():
+        return None
+
     try:
         local = VERSION.strip()
 
@@ -65,13 +82,12 @@ def extract_update(zip_path):
 
 
 def launch_updater(extract_dir, parent_pid=None):
+    updater = get_updater_path()
 
-    base = Path(sys.executable).parent
-    updater = base / "updater.exe"
+    if updater is None or not updater.exists():
+        return False
 
-    if not updater.exists():
-        print("updater.exe not found")
-        return
+    base = updater.parent
 
     args = [
         updater,
@@ -83,3 +99,4 @@ def launch_updater(extract_dir, parent_pid=None):
         args.append(str(parent_pid))
 
     subprocess.Popen(args)
+    return True

@@ -13,7 +13,6 @@ from core.update import (
 )
 
 import ctypes
-import time
 
 def main():
 
@@ -45,13 +44,24 @@ def main():
         )
 
         if reply == QMessageBox.Yes:
-
-            zip_path = download_update(update["url"])
-            extract_dir = extract_update(zip_path)
-
-            launch_updater(extract_dir, os.getpid())
-            app.quit()
-            return
+            try:
+                zip_path = download_update(update["url"])
+                extract_dir = extract_update(zip_path)
+            except Exception as exc:
+                QMessageBox.warning(
+                    None,
+                    "ToolBox Update",
+                    f"更新に失敗しました。\n{exc}",
+                )
+            else:
+                if launch_updater(extract_dir, os.getpid()):
+                    app.quit()
+                    return
+                QMessageBox.warning(
+                    None,
+                    "ToolBox Update",
+                    "この実行方法では自動更新を利用できません。",
+                )
 
     window = MainWindow()
     window.setWindowIcon(icon)
