@@ -1,4 +1,4 @@
-# MarkDown Help（AI生成）
+# Markdown Help
 
 タブごとに `file.md` を保持する、シンプルな Markdown エディタです。
 
@@ -12,13 +12,16 @@
 
 - `Import`: 既存の `.md` / `.txt` を読み込みます。
 - `Export`: 現在の内容を `.md` として保存します。
-- `font + / font -`: エディタの文字サイズを変更します。
+- ` + / - `: エディタの文字サイズを変更します。
 
 ## ショートカット
+- `Tab`: 選択範囲をインデントする
+- `Shift + Tab`: 選択範囲のインデントを戻す
 
 - `Ctrl + Shift + B`: 選択範囲を太字にする
 - `Ctrl + Shift + I`: 選択範囲を斜体にする
 - `Ctrl + Shift + D`: 選択範囲を強調する
+- `Ctrl + Shift + T`: 選択範囲のインデントとツリー図を切り替える
 - `Ctrl + Shift + C`: コードブロックを挿入する
 - `Ctrl + Shift + K`: リンク記法を挿入する
 - `Ctrl + Shift + L`: 箇条書き記号を切り替える

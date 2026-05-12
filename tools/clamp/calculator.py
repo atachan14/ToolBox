@@ -37,17 +37,6 @@ class ClampCalculator(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout()
 
-        self.free_box = QFrame()
-        self.free_box.setProperty("state", "normal")
-        free_layout = QVBoxLayout(self.free_box)
-        free_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.free_input = QLineEdit()
-        self.free_input.setPlaceholderText("16 350 767 32")
-        self.free_input.setClearButtonEnabled(True)
-        free_layout.addWidget(self.free_input)
-        layout.addWidget(self.free_box)
-
         self.form_box = QFrame()
         self.form_box.setProperty("state", "normal")
         form_layout = QFormLayout(self.form_box)
@@ -186,16 +175,13 @@ class ClampCalculator(QWidget):
         self.result_label.mousePressEvent = lambda e: self.copy_result()
         self.unit_toggle.currentIndexChanged.connect(self.toggle_result_unit)
 
-        self.free_input.installEventFilter(self)
         for widget in (self.min_px, self.max_px, self.min_view, self.max_view):
             widget.installEventFilter(self)
         self.reverse_input.installEventFilter(self)
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.FocusIn:
-            if obj == self.free_input:
-                self.set_last("free")
-            elif obj in (self.min_px, self.max_px, self.min_view, self.max_view):
+            if obj in (self.min_px, self.max_px, self.min_view, self.max_view):
                 self.set_last("form")
             elif obj == self.reverse_input:
                 self.set_last("reverse")
@@ -213,9 +199,7 @@ class ClampCalculator(QWidget):
 
     def handle_enter(self):
         focus = self.focusWidget()
-        if focus == self.free_input:
-            self.free_exe()
-        elif focus in (self.min_px, self.max_px, self.min_view, self.max_view):
+        if focus in (self.min_px, self.max_px, self.min_view, self.max_view):
             self.form_exe()
         elif focus == self.reverse_input:
             self.reverse_exe()
@@ -229,10 +213,8 @@ class ClampCalculator(QWidget):
     def calc_exe(self):
         if self.last_edited == "reverse":
             self.reverse_exe()
-        elif self.last_edited == "form":
-            self.form_exe()
         else:
-            self.free_exe()
+            self.form_exe()
 
     def flash_box(self, box: QFrame):
         box.setProperty("state", "active")
@@ -244,26 +226,6 @@ class ClampCalculator(QWidget):
         box.setProperty("state", "normal")
         box.style().unpolish(box)
         box.style().polish(box)
-
-    def free_exe(self):
-        self.flash_box(self.free_box)
-        text = self.free_input.text().strip()
-        if not text:
-            self.error_result("textが入力されてません")
-            return
-
-        normalized = text.replace(",", " ").replace("~", " ").replace("～", " ").replace("　", " ")
-        parts = normalized.split()
-        if len(parts) != 4:
-            self.error_result("textの形式が正しくありません（例: 16 350 767 32）")
-            return
-
-        min_value, min_view, max_view, max_value = parts
-        self.min_px.setText(min_value)
-        self.max_px.setText(max_value)
-        self.min_view.setText(min_view)
-        self.max_view.setText(max_view)
-        self.form_exe()
 
     def form_exe(self):
         self.flash_box(self.form_box)
@@ -408,7 +370,6 @@ class ClampCalculator(QWidget):
         self.result_label.style().polish(self.result_label)
 
     def reset_all(self):
-        self.free_input.clear()
         self.min_px.clear()
         self.max_px.clear()
         self.min_view.clear()
@@ -421,11 +382,11 @@ class ClampCalculator(QWidget):
         self.result_label.style().unpolish(self.result_label)
         self.result_label.style().polish(self.result_label)
 
-        for box in (self.free_box, self.form_box, self.reverse_box):
+        for box in (self.form_box, self.reverse_box):
             self._reset_box_state(box)
 
         self.last_edited = None
-        self.free_input.setFocus()
+        self.min_px.setFocus()
         if hasattr(self.tool, "_save_state"):
             self.tool._save_state()
 

@@ -1,4 +1,4 @@
-# Clip-Path Help（AI生成）
+# Clip-Path Help
 
 `clip-path: polygon(...)` を視覚的に作るツールです。  
 キャンバス編集、点テーブル編集、履歴保存に対応しています。

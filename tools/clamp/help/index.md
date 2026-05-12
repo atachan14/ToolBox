@@ -7,26 +7,19 @@ Calculator と History の 2 タブで構成されています。
 
 ![Calculator_SS](calculator.png)
 
-1. ①か②に値を入れてください。
-2. Enterキーを押すか、あるいは③のcalculationをクリックしてください。
+1. ②に値を入れてください。
+2. Enterキーを押すか、あるいは③のcalculateをクリックしてください。
 3. ④に計算結果が表示されます。
 
 ＿
 
 各入力フォームはTab/Shift+Tabで移動可能です。
 
-### ① まとめて入力
+### ① Calculator / History Tab
 
-②のフォームと同じ順で 4 つの値を入力します。
-  
-それぞれの値はスペースかカンマで区切ってください。
-  
-例:
-  
-16,350 767, 32 
+クリックでTabを切り替えます。
 
-
-### ② 個別入力
+### ② Input Form
 
 フォーム毎に値を入力します。
 
@@ -34,7 +27,8 @@ Calculator と History の 2 タブで構成されています。
 
 #### calculation
 
-最後にフォーカスした入力フォームの値を使って計算します。
+最後にフォーカスした入力欄に応じて、Input Form または Reverse を計算します。
+
 
 計算完了時処理
 
@@ -60,7 +54,7 @@ Calculator と History の 2 タブで構成されています。
 
 クリックで再コピーが可能です。
 
-### ⑤ 逆算
+### ⑤ Reverse
 
 下部の `reverse...` に既存の `clamp(...)` を入れると、各値を逆算してフォームへ戻します。
 
@@ -68,5 +62,7 @@ Calculator と History の 2 タブで構成されています。
 
 
 ## History
+
+![History_SS](history.png)
 
 各アイテムをクリックすると、対象の計算結果をコピーしつつ、対応する数値を Calculator に戻します。

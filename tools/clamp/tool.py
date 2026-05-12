@@ -36,7 +36,6 @@ class Tab(ToolBase):
 
     def _connect_state_sync(self):
         for widget in (
-            self.calculator.free_input,
             self.calculator.min_px,
             self.calculator.min_view,
             self.calculator.max_view,
@@ -48,7 +47,6 @@ class Tab(ToolBase):
 
     def _restore_state(self):
         state = self.load_state()
-        self.calculator.free_input.setText(state.get("free_input", ""))
         self.calculator.min_px.setText(state.get("min_px", ""))
         self.calculator.min_view.setText(state.get("min_view", ""))
         self.calculator.max_view.setText(state.get("max_view", ""))
@@ -61,7 +59,6 @@ class Tab(ToolBase):
     def _save_state(self, *_):
         self.save_state(
             {
-                "free_input": self.calculator.free_input.text(),
                 "min_px": self.calculator.min_px.text(),
                 "min_view": self.calculator.min_view.text(),
                 "max_view": self.calculator.max_view.text(),
