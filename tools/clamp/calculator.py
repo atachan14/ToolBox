@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .logic import build_clamp, parse_value_text
+from .logic import build_clamp, parse_value_text, resolve_view_unit
 
 
 class ClampCalculator(QWidget):
@@ -27,7 +27,8 @@ class ClampCalculator(QWidget):
         self.tool = tool
         self.last_edited = None
         self._current_result_text = "clamp(...)"
-        self._result_unit = ""
+        self._result_unit = "px"
+        self._view_unit = "vw"
         self._result_values = None
 
         self.setup_ui()
@@ -88,6 +89,7 @@ class ClampCalculator(QWidget):
         self.unit_toggle.addItem("px", "px")
         self.unit_toggle.addItem("%", "%")
         self.unit_toggle.addItem("rem", "rem")
+        self.unit_toggle.setCurrentIndex(self.unit_toggle.findData(self._result_unit))
 
         self.unit_arrow = QLabel("")
         self.unit_arrow.setObjectName("unitSelectorArrow")
@@ -97,8 +99,34 @@ class ClampCalculator(QWidget):
         selector_layout.addWidget(self.unit_toggle)
         selector_layout.addWidget(self.unit_arrow)
 
+        self.view_unit_selector_frame = QFrame()
+        self.view_unit_selector_frame.setObjectName("unitSelectorFrame")
+        self.view_unit_selector_frame.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        view_selector_layout = QHBoxLayout(self.view_unit_selector_frame)
+        view_selector_layout.setContentsMargins(0, 0, 0, 0)
+        view_selector_layout.setSpacing(0)
+
+        self.view_unit_toggle = QComboBox()
+        self.view_unit_toggle.setObjectName("unitSelector")
+        self.view_unit_toggle.setCursor(Qt.PointingHandCursor)
+        self.view_unit_toggle.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.view_unit_toggle.setMinimumWidth(44)
+        self.view_unit_toggle.addItem("", "")
+        self.view_unit_toggle.addItem("vw", "vw")
+        self.view_unit_toggle.addItem("vh", "vh")
+        self.view_unit_toggle.setCurrentIndex(self.view_unit_toggle.findData(self._view_unit))
+
+        self.view_unit_arrow = QLabel("")
+        self.view_unit_arrow.setObjectName("unitSelectorArrow")
+        self.view_unit_arrow.setAlignment(Qt.AlignCenter)
+        self.view_unit_arrow.setFixedWidth(6)
+
+        view_selector_layout.addWidget(self.view_unit_toggle)
+        view_selector_layout.addWidget(self.view_unit_arrow)
+
         result_row.addWidget(self.result_label, 1)
         result_row.addWidget(self.unit_selector_frame, 0, Qt.AlignTop)
+        result_row.addWidget(self.view_unit_selector_frame, 0, Qt.AlignTop)
         layout.addLayout(result_row)
 
         layout.addStretch()
@@ -174,6 +202,7 @@ class ClampCalculator(QWidget):
         self.reset_button.clicked.connect(self.reset_all)
         self.result_label.mousePressEvent = lambda e: self.copy_result()
         self.unit_toggle.currentIndexChanged.connect(self.toggle_result_unit)
+        self.view_unit_toggle.currentIndexChanged.connect(self.toggle_view_unit)
 
         for widget in (self.min_px, self.max_px, self.min_view, self.max_view):
             widget.installEventFilter(self)
@@ -238,11 +267,20 @@ class ClampCalculator(QWidget):
             self.error_result(max_value)
             return
 
-        try:
-            min_view = float(self.min_view.text())
-            max_view = float(self.max_view.text())
-        except ValueError:
-            self.error_result("数値を入力してください")
+        ok, min_view_value = parse_value_text(self.min_view.text())
+        if not ok:
+            self.error_result(min_view_value)
+            return
+        ok, max_view_value = parse_value_text(self.max_view.text())
+        if not ok:
+            self.error_result(max_view_value)
+            return
+
+        min_view, min_view_unit = min_view_value
+        max_view, max_view_unit = max_view_value
+        ok, view_unit = resolve_view_unit(min_view_unit, max_view_unit, self._view_unit)
+        if not ok:
+            self.error_result(view_unit)
             return
 
         ok, payload = build_clamp(
@@ -251,12 +289,22 @@ class ClampCalculator(QWidget):
             min_view,
             max_view,
             selected_unit=self._result_unit,
+            view_unit=view_unit,
         )
         if not ok:
             self.error_result(payload)
             return
 
-        self.success_result(self.min_px.text().strip(), min_view, max_view, self.max_px.text().strip(), payload)
+        if view_unit in {"", "vw", "vh"}:
+            self.set_view_unit(view_unit, save_state=False)
+        self.success_result(
+            self.min_px.text().strip(),
+            min_view,
+            max_view,
+            self.max_px.text().strip(),
+            payload,
+            view_unit=view_unit,
+        )
 
     def reverse_exe(self):
         self.flash_box(self.reverse_box)
@@ -274,7 +322,7 @@ class ClampCalculator(QWidget):
                 raise ValueError("mixed units")
 
             calc_match = re.fullmatch(
-                r"calc\(\s*(-?(?:\d+|\d*\.\d+))\s*([a-zA-Z%]*)\s*([+-])\s*(-?(?:\d+|\d*\.\d+))vw\s*\)",
+                r"calc\(\s*(-?(?:\d+|\d*\.\d+))\s*([a-zA-Z%]*)\s*([+-])\s*(-?(?:\d+|\d*\.\d+))\s*([a-zA-Z%]*)\s*\)",
                 calc_raw,
             )
             if not calc_match:
@@ -284,10 +332,11 @@ class ClampCalculator(QWidget):
             intercept_unit = calc_match.group(2)
             sign = -1 if calc_match.group(3) == "-" else 1
             slope = float(calc_match.group(4)) * sign
+            view_unit = calc_match.group(5)
             if intercept_unit != clamp_unit:
                 raise ValueError("mixed units")
             if slope == 0:
-                raise ValueError("vw cannot be zero")
+                raise ValueError("view coefficient cannot be zero")
 
             min_view = (min_value - intercept) / slope * 100
             max_view = (max_value - intercept) / slope * 100
@@ -300,22 +349,34 @@ class ClampCalculator(QWidget):
 
         self.min_px.setText(self._format_value_with_unit(min_value, clamp_unit))
         self.max_px.setText(self._format_value_with_unit(max_value, clamp_unit))
-        self.min_view.setText(self._format_number(min_view))
-        self.max_view.setText(self._format_number(max_view))
+        formatted_min_view = self._format_number(min_view)
+        formatted_max_view = self._format_number(max_view)
+        if view_unit in {"", "vw", "vh"}:
+            self.set_view_unit(view_unit, save_state=False)
+        else:
+            formatted_min_view += view_unit
+            formatted_max_view += view_unit
+        self.min_view.setText(formatted_min_view)
+        self.max_view.setText(formatted_max_view)
         self.set_result_unit(clamp_unit, save_state=False)
-        self.success_result(self.min_px.text().strip(), min_view, max_view, self.max_px.text().strip(), text)
+        self.success_result(
+            self.min_px.text().strip(),
+            min_view,
+            max_view,
+            self.max_px.text().strip(),
+            text,
+            view_unit=view_unit,
+        )
 
-    def run_from_history(self, entry):
-        self.min_px.setText(str(entry.get("min_px", "")))
-        self.min_view.setText(str(entry.get("min_view", "")))
-        self.max_view.setText(str(entry.get("max_view", "")))
-        self.max_px.setText(str(entry.get("max_px", "")))
-        self.set_last("form")
-        self.min_px.setFocus()
-        if hasattr(self.tool, "_save_state"):
-            self.tool._save_state()
-
-    def success_result(self, min_px=None, min_view=None, max_view=None, max_px=None, clamp_text=None):
+    def success_result(
+        self,
+        min_px=None,
+        min_view=None,
+        max_view=None,
+        max_px=None,
+        clamp_text=None,
+        view_unit=None,
+    ):
         clamp = clamp_text or self._build_result_text(min_px, min_view, max_view, max_px)
         if clamp is None:
             self.error_result("error")
@@ -326,6 +387,7 @@ class ClampCalculator(QWidget):
             str(max_px),
             float(min_view),
             float(max_view),
+            view_unit or self._view_unit,
         )
         self._current_result_text = clamp
         self.result_label.setText(clamp)
@@ -334,15 +396,8 @@ class ClampCalculator(QWidget):
         self.result_label.style().polish(self.result_label)
 
         self.copy_result()
-
-        if None not in (min_px, min_view, max_view, max_px):
-            self.tool.history.add_history(
-                clamp,
-                str(min_px),
-                self._format_number(float(min_view)),
-                self._format_number(float(max_view)),
-                str(max_px),
-            )
+        if hasattr(self.tool, "_save_state"):
+            self.tool._save_state()
 
     def error_result(self, message: str):
         self._result_values = None
@@ -393,6 +448,9 @@ class ClampCalculator(QWidget):
     def toggle_result_unit(self):
         self.set_result_unit(self.unit_toggle.currentData())
 
+    def toggle_view_unit(self):
+        self.set_view_unit(self.view_unit_toggle.currentData())
+
     def set_result_unit(self, unit: str, save_state: bool = True):
         self._result_unit = unit if unit in {"", "px", "%", "rem"} else ""
         self.unit_toggle.blockSignals(True)
@@ -401,7 +459,26 @@ class ClampCalculator(QWidget):
         self.unit_toggle.blockSignals(False)
 
         if self._result_values and self.result_label.property("state") in {"success", "copied"}:
-            min_px, max_px, min_view, max_view = self._result_values
+            min_px, max_px, min_view, max_view, _ = self._result_values
+            clamp = self._build_result_text(min_px, min_view, max_view, max_px)
+            if clamp:
+                self._current_result_text = clamp
+                if self.result_label.property("state") != "copied":
+                    self.result_label.setText(clamp)
+
+        if save_state and hasattr(self.tool, "_save_state"):
+            self.tool._save_state()
+
+    def set_view_unit(self, unit: str, save_state: bool = True):
+        self._view_unit = unit if unit in {"", "vw", "vh"} else "vw"
+        self.view_unit_toggle.blockSignals(True)
+        index = self.view_unit_toggle.findData(self._view_unit)
+        self.view_unit_toggle.setCurrentIndex(max(0, index))
+        self.view_unit_toggle.blockSignals(False)
+
+        if self._result_values and self.result_label.property("state") in {"success", "copied"}:
+            min_px, max_px, min_view, max_view, _ = self._result_values
+            self._result_values = (min_px, max_px, min_view, max_view, self._view_unit)
             clamp = self._build_result_text(min_px, min_view, max_view, max_px)
             if clamp:
                 self._current_result_text = clamp
@@ -424,8 +501,60 @@ class ClampCalculator(QWidget):
             float(min_view),
             float(max_view),
             selected_unit=self._result_unit,
+            view_unit=self._result_values[4] if self._result_values else self._view_unit,
         )
         return payload if ok else None
+
+    def state_payload(self) -> dict:
+        return {
+            "min_px": self.min_px.text(),
+            "min_view": self.min_view.text(),
+            "max_view": self.max_view.text(),
+            "max_px": self.max_px.text(),
+            "reverse_input": self.reverse_input.text(),
+            "result_unit": self._result_unit,
+            "view_unit": self._view_unit,
+            "last_edited": self.last_edited,
+            "result_text": self._current_result_text if self._result_values else "",
+            "result_values": list(self._result_values) if self._result_values else None,
+        }
+
+    def apply_state(self, state: dict):
+        self.min_px.setText(str(state.get("min_px", "")))
+        self.min_view.setText(str(state.get("min_view", "")))
+        self.max_view.setText(str(state.get("max_view", "")))
+        self.max_px.setText(str(state.get("max_px", "")))
+        self.reverse_input.setText(str(state.get("reverse_input", "")))
+        self.set_result_unit(str(state.get("result_unit", "px")), save_state=False)
+        self.set_view_unit(str(state.get("view_unit", "vw")), save_state=False)
+        self.last_edited = state.get("last_edited")
+
+        values = state.get("result_values")
+        if isinstance(values, list) and len(values) == 5:
+            try:
+                self._result_values = (
+                    str(values[0]),
+                    str(values[1]),
+                    float(values[2]),
+                    float(values[3]),
+                    str(values[4]),
+                )
+            except (TypeError, ValueError):
+                self._result_values = None
+        else:
+            self._result_values = None
+
+        result_text = state.get("result_text")
+        if self._result_values and isinstance(result_text, str) and result_text:
+            self._current_result_text = result_text
+            self.result_label.setText(result_text)
+            self.result_label.setProperty("state", "success")
+        else:
+            self._current_result_text = "clamp(...)"
+            self.result_label.setText(self._current_result_text)
+            self.result_label.setProperty("state", "start")
+        self.result_label.style().unpolish(self.result_label)
+        self.result_label.style().polish(self.result_label)
 
     def _parse_value_with_unit(self, text: str) -> tuple[float, str]:
         ok, payload = parse_value_text(text)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 SELECTOR_UNITS = {"", "px", "%", "rem"}
+VIEW_SELECTOR_UNITS = {"", "vw", "vh"}
 
 
 def parse_value_text(text: str) -> tuple[bool, tuple[float, str] | str]:
@@ -38,12 +39,23 @@ def resolve_output_unit(min_unit: str, max_unit: str, selected_unit: str) -> tup
     return True, ""
 
 
+def resolve_view_unit(min_unit: str, max_unit: str, selected_unit: str) -> tuple[bool, str]:
+    if min_unit and max_unit and min_unit != max_unit:
+        return False, "min view と max view の単位を揃えてください"
+    if min_unit or max_unit:
+        return True, min_unit or max_unit
+    if selected_unit in VIEW_SELECTOR_UNITS:
+        return True, selected_unit
+    return True, "vw"
+
+
 def build_clamp(
     min_value: tuple[float, str],
     max_value: tuple[float, str],
     min_view: float,
     max_view: float,
     selected_unit: str = "",
+    view_unit: str = "vw",
 ) -> tuple[bool, str]:
     if min_view == max_view:
         return False, "min view と max view が同じです"
@@ -66,7 +78,7 @@ def build_clamp(
 
     clamp = (
         f"clamp({_format_value(low, output_unit)}, "
-        f"calc({_format_value(intercept, output_unit)} {sign} {_format_number(abs(slope))}vw), "
+        f"calc({_format_value(intercept, output_unit)} {sign} {_format_number(abs(slope))}{view_unit}), "
         f"{_format_value(high, output_unit)})"
     )
     return True, clamp

@@ -1,4 +1,4 @@
-from tools.clamp.logic import build_clamp, parse_value_text, resolve_output_unit
+from tools.clamp.logic import build_clamp, parse_value_text, resolve_output_unit, resolve_view_unit
 
 
 def test_parse_value_text_accepts_number_and_unit():
@@ -64,3 +64,32 @@ def test_build_clamp_rejects_same_viewport_width():
     assert ok is False
     assert isinstance(message, str)
     assert message
+
+
+def test_resolve_view_unit_prefers_arbitrary_input_unit():
+    ok, unit = resolve_view_unit("dvh", "", "vw")
+
+    assert ok is True
+    assert unit == "dvh"
+
+
+def test_resolve_view_unit_rejects_mismatched_units():
+    ok, message = resolve_view_unit("vw", "vh", "vw")
+
+    assert ok is False
+    assert isinstance(message, str)
+    assert message
+
+
+def test_resolve_view_unit_allows_blank_selector():
+    ok, unit = resolve_view_unit("", "", "")
+
+    assert ok is True
+    assert unit == ""
+
+
+def test_build_clamp_uses_arbitrary_view_unit():
+    ok, value = build_clamp((16, "px"), (32, "px"), 320, 1280, view_unit="custom")
+
+    assert ok is True
+    assert value == "clamp(16px, calc(10.67px + 1.67custom), 32px)"

@@ -61,6 +61,7 @@ Gradientタブ
 ### Clamp
 
 CSS の `clamp(...)` を作るための計算ツールです。
+view rangeごとにCalculatorタブを作成でき、`vw` / `vh`を含む任意のview単位を使用できます。
 
 ### Clip-Path
 

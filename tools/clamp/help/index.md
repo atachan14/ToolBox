@@ -1,68 +1,49 @@
 # Clamp Help
 
-数値から CSS の `clamp(...)` を作るツールです。  
-Calculator と History の 2 タブで構成されています。
+数値から CSS の `clamp(...)` を作るツールです。
 
-## Calculator
+## Calculatorタブ
 
-![Calculator_SS](calculator.png)
+`+`タブからCalculatorを複数追加できます。各タブは名前、入力内容、単位、計算結果を個別に保持します。
 
-1. ②に値を入れてください。
-2. Enterキーを押すか、あるいは③のcalculateをクリックしてください。
-3. ④に計算結果が表示されます。
+- タブをダブルクリック、右クリックメニュー、または`F2`でリネーム
+- タブをドラッグして並べ替え
+- タブの右クリックメニューから削除
+- Calculatorをすべて削除した場合も、`+`タブから再度追加可能
 
-＿
+## Input Form
 
-各入力フォームはTab/Shift+Tabで移動可能です。
+`min value`、`min view`、`max view`、`max value`を入力し、Enterキーまたは`calculate`で計算します。
 
-### ① Calculator / History Tab
+valueとviewには単位を直接入力できます。入力した単位はセレクターより優先されます。
 
-クリックでTabを切り替えます。
+```text
+min value: 16px
+min view: 600dvh
+max view: 994
+max value: 32px
+```
 
-### ② Input Form
+minとmaxの片方だけに単位を入力した場合も、その単位を使用します。両方に異なる単位が入力されている場合はエラーになります。
 
-フォーム毎に値を入力します。
+## Unit Selector
 
-### ③ calculation / reset
+結果欄の右側に2つの単位セレクターがあります。
 
-#### calculation
+- 空白 / `px / % / rem`: valueの単位（初期値は`px`）
+- 空白 / `vw / vh`: viewの単位（初期値は`vw`）
 
-最後にフォーカスした入力欄に応じて、Input Form または Reverse を計算します。
+セレクターは単位なしで入力した場合の既定値です。入力欄には、セレクターにない任意の単位も指定できます。
 
+## calculation / reset
 
-計算完了時処理
+計算完了時に結果を表示し、クリップボードへコピーします。結果をクリックすると再コピーできます。
 
-- resultに計算結果が表示される。
-- クリップボードに値がコピーされる。
-- historyに計算結果が登録される。
+- 計算: `Enter`
+- 全入力のリセット: `Ctrl+Delete`
 
-＿
+## Reverse
 
-ショートカットキー：Enter
+下部の`reverse...`に既存の`clamp(...)`を入力すると、各値とview rangeを逆算してフォームへ戻します。
 
-#### reset
-
-全入力フォームの値をリセットします。
-
-＿
-
-ショートカットキー：Ctrl+Delete
-
-### ④ result
-
-計算結果が表示されます。
-
-クリックで再コピーが可能です。
-
-### ⑤ Reverse
-
-下部の `reverse...` に既存の `clamp(...)` を入れると、各値を逆算してフォームへ戻します。
-
-主に、既存コードの view range を調べるために使用します。
-
-
-## History
-
-![History_SS](history.png)
-
-各アイテムをクリックすると、対象の計算結果をコピーしつつ、対応する数値を Calculator に戻します。
+`vw`、`vh`に加えて、任意のview単位を読み取れます。
